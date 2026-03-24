@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/mcpfleet/registry/internal/api"
 	"github.com/mcpfleet/registry/internal/db"
+	authmw "github.com/mcpfleet/registry/internal/middleware"
 )
 
 func main() {
@@ -39,24 +39,48 @@ func main() {
 		log.Fatalf("failed to run migrations: %v", err)
 	}
 
+	store := db.NewStore(database)
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
+	// Public endpoints — no auth required
+	// /docs, /openapi.json served by Huma; /healthz served below
+	r.Use(authmw.BearerAuth(store,
+		"/docs",
+		"/openapi",
+		"/healthz",
+		"/favicon",
+	))
+
+	// Health check
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	config := huma.DefaultConfig("mcpfleet Registry API", "1.0.0")
 	config.Info.Description = "REST API for managing MCP server definitions and auth tokens"
+	config.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		"bearerAuth": {
+			Type:         "http",
+			Scheme:       "bearer",
+			BearerFormat: "opaque",
+		},
+	}
+	config.Security = []map[string][]string{
+		{"bearerAuth": {}},
+	}
 
 	humaAPI := humachi.New(r, config)
-
-	store := db.NewStore(database)
 	api.RegisterRoutes(humaAPI, store)
 
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("registry listening on %s", addr)
+	log.Printf("registry listening on %s (auth enabled)", addr)
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
-
-var _ = context.Background
