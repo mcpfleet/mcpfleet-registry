@@ -1,0 +1,11 @@
+.git
+.gitignore
+*.md
+*.db
+*.db-shm
+*.db-wal
+docker-compose.yml
+.env
+.env.*
+tmp/
+.DS_Store
