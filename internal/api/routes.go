@@ -28,7 +28,7 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		OperationID: "get-server",
 		Method:      http.MethodGet,
 		Path:        "/v1/servers/{id}",
-		Summary:     "Get MCP server",
+		Summary:     "Get MCP server by name",
 		Tags:        []string{"servers"},
 	}, h.GetServer)
 
@@ -38,7 +38,6 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Path:        "/v1/servers",
 		Summary:     "Create MCP server",
 		Tags:        []string{"servers"},
-		DefaultStatus: http.StatusCreated,
 	}, h.CreateServer)
 
 	huma.Register(api, huma.Operation{
@@ -55,7 +54,6 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Path:        "/v1/servers/{id}",
 		Summary:     "Delete MCP server",
 		Tags:        []string{"servers"},
-		DefaultStatus: http.StatusNoContent,
 	}, h.DeleteServer)
 
 	// Tokens
@@ -73,7 +71,6 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Path:        "/v1/tokens",
 		Summary:     "Create auth token",
 		Tags:        []string{"tokens"},
-		DefaultStatus: http.StatusCreated,
 	}, h.CreateToken)
 
 	huma.Register(api, huma.Operation{
@@ -82,29 +79,41 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Path:        "/v1/tokens/{id}",
 		Summary:     "Delete auth token",
 		Tags:        []string{"tokens"},
-		DefaultStatus: http.StatusNoContent,
 	}, h.DeleteToken)
 }
 
-// ---- Input/Output types ----
+// --- DTOs ---
 
 type ServerOutput struct {
-	Body *db.Server
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Transport   string            `json:"transport"`
+	Install     map[string]string `json:"install"`
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
+	Env         map[string]string `json:"env"`
+	Tags        []string          `json:"tags"`
+	Platforms   []string          `json:"platforms"`
+	CreatedAt   string            `json:"created_at"`
+	UpdatedAt   string            `json:"updated_at"`
 }
 
 type ServersOutput struct {
-	Body []db.Server
+	Body []ServerOutput
 }
 
 type ServerInput struct {
-	ID   string `path:"id"`
 	Body struct {
-		Name        string            `json:"name" minLength:"1"`
+		Name        string            `json:"name" required:"true"`
 		Description string            `json:"description"`
-		Command     string            `json:"command" minLength:"1"`
+		Transport   string            `json:"transport"`
+		Install     map[string]string `json:"install"`
+		Command     string            `json:"command"`
 		Args        []string          `json:"args"`
 		Env         map[string]string `json:"env"`
 		Tags        []string          `json:"tags"`
+		Platforms   []string          `json:"platforms"`
 	}
 }
 
@@ -113,90 +122,152 @@ type IDInput struct {
 }
 
 type TokenOutput struct {
-	Body *db.CreateTokenResult
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
 }
 
 type TokensOutput struct {
-	Body []db.Token
+	Body []TokenOutput
 }
 
 type CreateTokenInput struct {
 	Body struct {
-		Name string `json:"name" minLength:"1"`
+		Name string `json:"name" required:"true"`
 	}
 }
 
-// ---- Handlers ----
+// --- Helpers ---
+
+func toServerOutput(s db.Server) ServerOutput {
+	install := s.Install
+	if install == nil {
+		install = map[string]string{}
+	}
+	args := s.Args
+	if args == nil {
+		args = []string{}
+	}
+	env := s.Env
+	if env == nil {
+		env = map[string]string{}
+	}
+	tags := s.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	platforms := s.Platforms
+	if platforms == nil {
+		platforms = []string{}
+	}
+	return ServerOutput{
+		ID:          s.ID,
+		Name:        s.Name,
+		Description: s.Description,
+		Transport:   s.Transport,
+		Install:     install,
+		Command:     s.Command,
+		Args:        args,
+		Env:         env,
+		Tags:        tags,
+		Platforms:   platforms,
+		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:   s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+}
+
+// --- Handlers ---
 
 func (h *Handler) ListServers(ctx context.Context, _ *struct{}) (*ServersOutput, error) {
 	servers, err := h.store.ListServers(ctx)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to list servers", err)
+		return nil, huma.Error500InternalServerError("list servers", err)
 	}
-	if servers == nil {
-		servers = []db.Server{}
+	out := &ServersOutput{}
+	for _, s := range servers {
+		out.Body = append(out.Body, toServerOutput(s))
 	}
-	return &ServersOutput{Body: servers}, nil
+	if out.Body == nil {
+		out.Body = []ServerOutput{}
+	}
+	return out, nil
 }
 
-func (h *Handler) GetServer(ctx context.Context, input *IDInput) (*ServerOutput, error) {
+type SingleServerOutput struct {
+	Body ServerOutput
+}
+
+func (h *Handler) GetServer(ctx context.Context, input *IDInput) (*SingleServerOutput, error) {
 	srv, err := h.store.GetServer(ctx, input.ID)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to get server", err)
+		return nil, huma.Error500InternalServerError("get server", err)
 	}
 	if srv == nil {
 		return nil, huma.Error404NotFound("server not found")
 	}
-	return &ServerOutput{Body: srv}, nil
+	return &SingleServerOutput{Body: toServerOutput(*srv)}, nil
 }
 
-func (h *Handler) CreateServer(ctx context.Context, input *struct {
-	Body struct {
-		Name        string            `json:"name" minLength:"1"`
-		Description string            `json:"description"`
-		Command     string            `json:"command" minLength:"1"`
-		Args        []string          `json:"args"`
-		Env         map[string]string `json:"env"`
-		Tags        []string          `json:"tags"`
-	}
-}) (*ServerOutput, error) {
+func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*SingleServerOutput, error) {
 	srv := &db.Server{
 		Name:        input.Body.Name,
 		Description: input.Body.Description,
+		Transport:   input.Body.Transport,
+		Install:     input.Body.Install,
 		Command:     input.Body.Command,
 		Args:        input.Body.Args,
 		Env:         input.Body.Env,
 		Tags:        input.Body.Tags,
+		Platforms:   input.Body.Platforms,
+	}
+	if srv.Transport == "" {
+		srv.Transport = "stdio"
 	}
 	if err := h.store.CreateServer(ctx, srv); err != nil {
-		return nil, huma.Error500InternalServerError("failed to create server", err)
+		return nil, huma.Error500InternalServerError("create server", err)
 	}
-	return &ServerOutput{Body: srv}, nil
+	return &SingleServerOutput{Body: toServerOutput(*srv)}, nil
 }
 
-func (h *Handler) UpdateServer(ctx context.Context, input *ServerInput) (*ServerOutput, error) {
+func (h *Handler) UpdateServer(ctx context.Context, input *struct {
+	ID   string `path:"id"`
+	Body struct {
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Transport   string            `json:"transport"`
+		Install     map[string]string `json:"install"`
+		Command     string            `json:"command"`
+		Args        []string          `json:"args"`
+		Env         map[string]string `json:"env"`
+		Tags        []string          `json:"tags"`
+		Platforms   []string          `json:"platforms"`
+	}
+}) (*SingleServerOutput, error) {
 	existing, err := h.store.GetServer(ctx, input.ID)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to get server", err)
+		return nil, huma.Error500InternalServerError("get server", err)
 	}
 	if existing == nil {
 		return nil, huma.Error404NotFound("server not found")
 	}
 	existing.Name = input.Body.Name
 	existing.Description = input.Body.Description
+	existing.Transport = input.Body.Transport
+	existing.Install = input.Body.Install
 	existing.Command = input.Body.Command
 	existing.Args = input.Body.Args
 	existing.Env = input.Body.Env
 	existing.Tags = input.Body.Tags
+	existing.Platforms = input.Body.Platforms
 	if err := h.store.UpdateServer(ctx, existing); err != nil {
-		return nil, huma.Error500InternalServerError("failed to update server", err)
+		return nil, huma.Error500InternalServerError("update server", err)
 	}
-	return &ServerOutput{Body: existing}, nil
+	return &SingleServerOutput{Body: toServerOutput(*existing)}, nil
 }
 
 func (h *Handler) DeleteServer(ctx context.Context, input *IDInput) (*struct{}, error) {
 	if err := h.store.DeleteServer(ctx, input.ID); err != nil {
-		return nil, huma.Error500InternalServerError("failed to delete server", err)
+		return nil, huma.Error500InternalServerError("delete server", err)
 	}
 	return nil, nil
 }
@@ -204,25 +275,43 @@ func (h *Handler) DeleteServer(ctx context.Context, input *IDInput) (*struct{}, 
 func (h *Handler) ListTokens(ctx context.Context, _ *struct{}) (*TokensOutput, error) {
 	tokens, err := h.store.ListTokens(ctx)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to list tokens", err)
+		return nil, huma.Error500InternalServerError("list tokens", err)
 	}
-	if tokens == nil {
-		tokens = []db.Token{}
+	out := &TokensOutput{}
+	for _, t := range tokens {
+		out.Body = append(out.Body, TokenOutput{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z")})
 	}
-	return &TokensOutput{Body: tokens}, nil
+	if out.Body == nil {
+		out.Body = []TokenOutput{}
+	}
+	return out, nil
 }
 
-func (h *Handler) CreateToken(ctx context.Context, input *CreateTokenInput) (*TokenOutput, error) {
+type CreateTokenOutput struct {
+	Body struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Token     string `json:"token"`
+		CreatedAt string `json:"created_at"`
+	}
+}
+
+func (h *Handler) CreateToken(ctx context.Context, input *CreateTokenInput) (*CreateTokenOutput, error) {
 	result, err := h.store.CreateToken(ctx, input.Body.Name)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("failed to create token", err)
+		return nil, huma.Error500InternalServerError("create token", err)
 	}
-	return &TokenOutput{Body: result}, nil
+	out := &CreateTokenOutput{}
+	out.Body.ID = result.ID
+	out.Body.Name = result.Name
+	out.Body.Token = result.RawToken
+	out.Body.CreatedAt = result.CreatedAt.Format("2006-01-02T15:04:05Z")
+	return out, nil
 }
 
 func (h *Handler) DeleteToken(ctx context.Context, input *IDInput) (*struct{}, error) {
 	if err := h.store.DeleteToken(ctx, input.ID); err != nil {
-		return nil, huma.Error500InternalServerError("failed to delete token", err)
+		return nil, huma.Error500InternalServerError("delete token", err)
 	}
 	return nil, nil
 }
