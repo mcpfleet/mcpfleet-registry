@@ -28,10 +28,10 @@ func Migrate(db *sql.DB) error {
 			hash TEXT NOT NULL UNIQUE,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			last_used_at DATETIME
-		)`},,
+		)`},
 		{4, `ALTER TABLE servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'stdio'`},
 		{5, `ALTER TABLE servers ADD COLUMN install TEXT NOT NULL DEFAULT '{}'`},
-		{6, `ALTER TABLE servers ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'`}
+		{6, `ALTER TABLE servers ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)
