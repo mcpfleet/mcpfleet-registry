@@ -53,6 +53,7 @@ func main() {
 		"/openapi",
 		"/healthz",
 		"/favicon",
+		"/bootstrap",
 	))
 
 	// Health check

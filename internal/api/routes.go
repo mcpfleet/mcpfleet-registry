@@ -80,6 +80,15 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Summary:     "Delete auth token",
 		Tags:        []string{"tokens"},
 	}, h.DeleteToken)
+
+	// Bootstrap - create first admin token without auth
+	huma.Register(api, huma.Operation{
+		OperationID: "bootstrap",
+		Method:      http.MethodPost,
+		Path:        "/bootstrap",
+		Summary:     "Create first admin token (no auth required)",
+		Tags:        []string{"bootstrap"},
+	}, h.Bootstrap)
 }
 
 // --- DTOs ---
@@ -134,6 +143,21 @@ type TokensOutput struct {
 type CreateTokenInput struct {
 	Body struct {
 		Name string `json:"name" required:"true"`
+	}
+}
+
+type BootstrapInput struct {
+	Body struct {
+		Name string `json:"name" required:"true"`
+	}
+}
+
+type BootstrapOutput struct {
+	Body struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Token     string `json:"token"`
+		CreatedAt string `json:"created_at"`
 	}
 }
 
@@ -314,4 +338,28 @@ func (h *Handler) DeleteToken(ctx context.Context, input *IDInput) (*struct{}, e
 		return nil, huma.Error500InternalServerError("delete token", err)
 	}
 	return nil, nil
+}
+
+func (h *Handler) Bootstrap(ctx context.Context, input *BootstrapInput) (*BootstrapOutput, error) {
+	// Check if any tokens already exist
+	tokens, err := h.store.ListTokens(ctx)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("check tokens", err)
+	}
+	if len(tokens) > 0 {
+		return nil, huma.Error403Forbidden("bootstrap only available when no tokens exist")
+	}
+
+	// Create first admin token
+	result, err := h.store.CreateToken(ctx, input.Body.Name)
+	if err != nil {
+		return nil, huma.Error500InternalServerError("create token", err)
+	}
+
+	out := &BootstrapOutput{}
+	out.Body.ID = result.ID
+	out.Body.Name = result.Name
+	out.Body.Token = result.RawToken // Only show full token once
+	out.Body.CreatedAt = result.CreatedAt.Format("2006-01-02T15:04:05Z")
+	return out, nil
 }

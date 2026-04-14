@@ -52,15 +52,17 @@ go run ./cmd/registry
 
 ## First-time setup
 
-Before authentication is enabled, bootstrap your first admin token directly on the server:
+The registry includes a bootstrap endpoint to create your first admin token without requiring authentication. This endpoint only works when no tokens exist in the database.
 
 ```bash
-# Create the first token (run once on first startup)
+# Create the first admin token (run once on first startup)
 curl -X POST http://localhost:8080/bootstrap \
   -H 'Content-Type: application/json' \
-  -d '{"name": "admin"}'
-# => {"token": "mcp_xxxxxxxxxxxx"}
+  -d '{"body": {"name": "admin"}}'
+# => {"body": {"id": "...", "name": "admin", "token": "mcp_xxxxxxxxxxxx", "created_at": "..."}}
 ```
+
+**Important:** Save the token immediately! The bootstrap endpoint returns the full token, but for security reasons you should store it safely.
 
 Then use this token with the mcpfleet CLI:
 
@@ -82,6 +84,7 @@ Authorization: Bearer mcp_<token>
 - `GET /healthz` — health check
 - `GET /docs` — Swagger UI
 - `GET /openapi.json` — OpenAPI schema
+- `POST /bootstrap` — Create first admin token (only works when database is empty)
 
 ## API reference
 
