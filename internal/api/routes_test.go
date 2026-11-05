@@ -73,7 +73,6 @@ func TestCreateServer(t *testing.T) {
 	_, server := setupTestAPI(t)
 	defer server.Close()
 
-	// huma treats every ServerInput field without omitempty as required.
 	payload := map[string]interface{}{
 		"name":        "new-server",
 		"description": "",
