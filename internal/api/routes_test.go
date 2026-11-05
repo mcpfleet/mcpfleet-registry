@@ -73,15 +73,17 @@ func TestCreateServer(t *testing.T) {
 	_, server := setupTestAPI(t)
 	defer server.Close()
 
+	// huma treats every ServerInput field without omitempty as required.
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name":      "new-server",
-			"transport": "stdio",
-			"install": map[string]string{
-				"type": "npx",
-			},
-			"command": "npx",
-		},
+		"name":        "new-server",
+		"description": "",
+		"transport":   "stdio",
+		"install":     map[string]string{"type": "npx"},
+		"command":     "npx",
+		"args":        []string{},
+		"env":         map[string]string{},
+		"tags":        []string{},
+		"platforms":   []string{},
 	}
 
 	body, _ := json.Marshal(payload)
@@ -95,10 +97,8 @@ func TestCreateServer(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "new-server", bodyData["name"])
-	assert.NotEmpty(t, bodyData["id"])
+	assert.Equal(t, "new-server", result["name"])
+	assert.NotEmpty(t, result["id"])
 }
 
 func TestGetServer(t *testing.T) {
@@ -127,10 +127,8 @@ func TestGetServer(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "get-test", bodyData["name"])
-	assert.Equal(t, srv.ID, bodyData["id"])
+	assert.Equal(t, "get-test", result["name"])
+	assert.Equal(t, srv.ID, result["id"])
 }
 
 func TestUpdateServer(t *testing.T) {
@@ -151,13 +149,15 @@ func TestUpdateServer(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, srv))
 
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name":        "update-test",
-			"description": "Updated",
-			"transport":   "stdio",
-			"install":     map[string]string{"type": "npx"},
-			"command":     "npx",
-		},
+		"name":        "update-test",
+		"description": "Updated",
+		"transport":   "stdio",
+		"install":     map[string]string{"type": "npx"},
+		"command":     "npx",
+		"args":        []string{},
+		"env":         map[string]string{},
+		"tags":        []string{},
+		"platforms":   []string{},
 	}
 
 	body, _ := json.Marshal(payload)
@@ -233,9 +233,7 @@ func TestCreateToken(t *testing.T) {
 	defer server.Close()
 
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name": "test-token",
-		},
+		"name": "test-token",
 	}
 
 	body, _ := json.Marshal(payload)
@@ -249,11 +247,9 @@ func TestCreateToken(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "test-token", bodyData["name"])
-	assert.NotEmpty(t, bodyData["token"])
-	assert.Contains(t, bodyData["token"], "mcp_")
+	assert.Equal(t, "test-token", result["name"])
+	assert.NotEmpty(t, result["token"])
+	assert.Contains(t, result["token"], "mcp_")
 }
 
 func TestBootstrap(t *testing.T) {
