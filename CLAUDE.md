@@ -14,7 +14,7 @@ go run ./cmd/registry                 # run the API locally
 docker compose up --build             # build the image and run it on :8080
 ```
 
-CI (`.github/workflows/ci.yml`) runs `go mod tidy`, build and vet with cgo on Go 1.23 for every PR to `main`.
+CI (`.github/workflows/ci.yml`) runs on every PR to `main` with cgo enabled; the workflow file is the source of truth for which of the commands above it runs.
 
 ## Platform
 
