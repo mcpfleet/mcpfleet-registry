@@ -266,9 +266,7 @@ func TestBootstrap(t *testing.T) {
 
 	t.Run("First bootstrap succeeds", func(t *testing.T) {
 		payload := map[string]interface{}{
-			"body": map[string]interface{}{
-				"name": "admin",
-			},
+			"name": "admin",
 		}
 
 		body, _ := json.Marshal(payload)
@@ -282,14 +280,12 @@ func TestBootstrap(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 
-		bodyData, ok := result["body"].(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "admin", bodyData["name"])
-		assert.NotEmpty(t, bodyData["token"])
-		assert.Contains(t, bodyData["token"], "mcp_")
+		assert.Equal(t, "admin", result["name"])
+		assert.NotEmpty(t, result["token"])
+		assert.Contains(t, result["token"], "mcp_")
 
 		// Save token for next test
-		token := bodyData["token"].(string)
+		token := result["token"].(string)
 		assert.NotEmpty(t, token)
 
 		// Verify token was created in database
@@ -300,10 +296,16 @@ func TestBootstrap(t *testing.T) {
 	})
 
 	t.Run("Second bootstrap fails", func(t *testing.T) {
+		// Seed a token so this subtest does not depend on the first one.
+		tokens, err := store.ListTokens(ctx)
+		require.NoError(t, err)
+		if len(tokens) == 0 {
+			_, err = store.CreateToken(ctx, "admin")
+			require.NoError(t, err)
+		}
+
 		payload := map[string]interface{}{
-			"body": map[string]interface{}{
-				"name": "admin2",
-			},
+			"name": "admin2",
 		}
 
 		body, _ := json.Marshal(payload)
