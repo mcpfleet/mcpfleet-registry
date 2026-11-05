@@ -280,10 +280,6 @@ func TestBootstrap(t *testing.T) {
 		assert.NotEmpty(t, result["token"])
 		assert.Contains(t, result["token"], "mcp_")
 
-		// Save token for next test
-		token := result["token"].(string)
-		assert.NotEmpty(t, token)
-
 		// Verify token was created in database
 		tokens, err := store.ListTokens(ctx)
 		require.NoError(t, err)
