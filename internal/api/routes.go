@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -204,6 +206,11 @@ func toServerOutput(s db.Server) ServerOutput {
 	}
 }
 
+// nameTakenError is the 409 returned when a server name is already used.
+func nameTakenError(name string) huma.StatusError {
+	return huma.Error409Conflict(fmt.Sprintf("server name %q is already taken", name))
+}
+
 // --- Handlers ---
 
 func (h *Handler) ListServers(ctx context.Context, _ *struct{}) (*ServersOutput, error) {
@@ -252,6 +259,9 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 		srv.Transport = "stdio"
 	}
 	if err := h.store.CreateServer(ctx, srv); err != nil {
+		if errors.Is(err, db.ErrNameTaken) {
+			return nil, nameTakenError(srv.Name)
+		}
 		return nil, huma.Error500InternalServerError("create server", err)
 	}
 	return &SingleServerOutput{Body: toServerOutput(*srv)}, nil
@@ -281,6 +291,9 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 		existing.Transport = "stdio"
 	}
 	if err := h.store.UpdateServer(ctx, existing); err != nil {
+		if errors.Is(err, db.ErrNameTaken) {
+			return nil, nameTakenError(existing.Name)
+		}
 		return nil, huma.Error500InternalServerError("update server", err)
 	}
 	return &SingleServerOutput{Body: toServerOutput(*existing)}, nil
@@ -288,6 +301,9 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 
 func (h *Handler) DeleteServer(ctx context.Context, input *IDInput) (*struct{}, error) {
 	if err := h.store.DeleteServer(ctx, input.ID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, huma.Error404NotFound("server not found")
+		}
 		return nil, huma.Error500InternalServerError("delete server", err)
 	}
 	return nil, nil
