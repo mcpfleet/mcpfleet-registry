@@ -73,15 +73,17 @@ func TestCreateServer(t *testing.T) {
 	_, server := setupTestAPI(t)
 	defer server.Close()
 
+	// huma treats every ServerInput field without omitempty as required.
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name":      "new-server",
-			"transport": "stdio",
-			"install": map[string]string{
-				"type": "npx",
-			},
-			"command": "npx",
-		},
+		"name":        "new-server",
+		"description": "",
+		"transport":   "stdio",
+		"install":     map[string]string{"type": "npx"},
+		"command":     "npx",
+		"args":        []string{},
+		"env":         map[string]string{},
+		"tags":        []string{},
+		"platforms":   []string{},
 	}
 
 	body, _ := json.Marshal(payload)
@@ -95,10 +97,8 @@ func TestCreateServer(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "new-server", bodyData["name"])
-	assert.NotEmpty(t, bodyData["id"])
+	assert.Equal(t, "new-server", result["name"])
+	assert.NotEmpty(t, result["id"])
 }
 
 func TestGetServer(t *testing.T) {
@@ -127,10 +127,8 @@ func TestGetServer(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "get-test", bodyData["name"])
-	assert.Equal(t, srv.ID, bodyData["id"])
+	assert.Equal(t, "get-test", result["name"])
+	assert.Equal(t, srv.ID, result["id"])
 }
 
 func TestUpdateServer(t *testing.T) {
@@ -151,13 +149,15 @@ func TestUpdateServer(t *testing.T) {
 	require.NoError(t, store.CreateServer(ctx, srv))
 
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name":        "update-test",
-			"description": "Updated",
-			"transport":   "stdio",
-			"install":     map[string]string{"type": "npx"},
-			"command":     "npx",
-		},
+		"name":        "update-test",
+		"description": "Updated",
+		"transport":   "stdio",
+		"install":     map[string]string{"type": "npx"},
+		"command":     "npx",
+		"args":        []string{},
+		"env":         map[string]string{},
+		"tags":        []string{},
+		"platforms":   []string{},
 	}
 
 	body, _ := json.Marshal(payload)
@@ -233,9 +233,7 @@ func TestCreateToken(t *testing.T) {
 	defer server.Close()
 
 	payload := map[string]interface{}{
-		"body": map[string]interface{}{
-			"name": "test-token",
-		},
+		"name": "test-token",
 	}
 
 	body, _ := json.Marshal(payload)
@@ -249,11 +247,9 @@ func TestCreateToken(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 
-	bodyData, ok := result["body"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "test-token", bodyData["name"])
-	assert.NotEmpty(t, bodyData["token"])
-	assert.Contains(t, bodyData["token"], "mcp_")
+	assert.Equal(t, "test-token", result["name"])
+	assert.NotEmpty(t, result["token"])
+	assert.Contains(t, result["token"], "mcp_")
 }
 
 func TestBootstrap(t *testing.T) {
@@ -266,9 +262,7 @@ func TestBootstrap(t *testing.T) {
 
 	t.Run("First bootstrap succeeds", func(t *testing.T) {
 		payload := map[string]interface{}{
-			"body": map[string]interface{}{
-				"name": "admin",
-			},
+			"name": "admin",
 		}
 
 		body, _ := json.Marshal(payload)
@@ -282,15 +276,9 @@ func TestBootstrap(t *testing.T) {
 		err = json.NewDecoder(resp.Body).Decode(&result)
 		require.NoError(t, err)
 
-		bodyData, ok := result["body"].(map[string]interface{})
-		require.True(t, ok)
-		assert.Equal(t, "admin", bodyData["name"])
-		assert.NotEmpty(t, bodyData["token"])
-		assert.Contains(t, bodyData["token"], "mcp_")
-
-		// Save token for next test
-		token := bodyData["token"].(string)
-		assert.NotEmpty(t, token)
+		assert.Equal(t, "admin", result["name"])
+		assert.NotEmpty(t, result["token"])
+		assert.Contains(t, result["token"], "mcp_")
 
 		// Verify token was created in database
 		tokens, err := store.ListTokens(ctx)
@@ -300,10 +288,16 @@ func TestBootstrap(t *testing.T) {
 	})
 
 	t.Run("Second bootstrap fails", func(t *testing.T) {
+		// Seed a token so this subtest does not depend on the first one.
+		tokens, err := store.ListTokens(ctx)
+		require.NoError(t, err)
+		if len(tokens) == 0 {
+			_, err = store.CreateToken(ctx, "admin")
+			require.NoError(t, err)
+		}
+
 		payload := map[string]interface{}{
-			"body": map[string]interface{}{
-				"name": "admin2",
-			},
+			"name": "admin2",
 		}
 
 		body, _ := json.Marshal(payload)
@@ -338,4 +332,48 @@ func TestDeleteToken(t *testing.T) {
 	tokens, err := store.ListTokens(ctx)
 	require.NoError(t, err)
 	assert.Len(t, tokens, 0)
+}
+
+// postJSON sends payload as a flat JSON request body, the shape huma expects.
+func postJSON(t *testing.T, url string, payload interface{}) *http.Response {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	resp, err := http.Post(url, "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	return resp
+}
+
+// A valid bootstrap request must be rejected with 403 once any token exists.
+func TestBootstrap_RejectsWhenTokenExists(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	_, err := db.NewStore(dbConn).CreateToken(context.Background(), "admin")
+	require.NoError(t, err)
+
+	resp := postJSON(t, server.URL+"/bootstrap", map[string]interface{}{"name": "admin2"})
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// huma validates the request body before the handler runs: a body wrapped in
+// a "body" key does not match the schema and is rejected with 422.
+func TestBootstrap_WrappedBodyIs422(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp := postJSON(t, server.URL+"/bootstrap", map[string]interface{}{
+		"body": map[string]interface{}{"name": "x"},
+	})
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+
+	tokens, err := db.NewStore(dbConn).ListTokens(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, tokens)
 }
