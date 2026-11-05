@@ -43,12 +43,15 @@ The API will be available at `http://localhost:8080`.
 
 ### Manual
 
+The SQLite driver needs cgo: a C compiler and the SQLite headers (for example `gcc` and `libsqlite3-dev` on Debian/Ubuntu).
+
 ```bash
 git clone https://github.com/mcpfleet/mcpfleet-registry
 cd mcpfleet-registry
-go mod tidy
-go run ./cmd/registry
+CGO_ENABLED=1 go run ./cmd/registry
 ```
+
+The database is created as `./registry.db` in the current directory; see [Configuration](#configuration) to change it.
 
 ## First-time setup
 
@@ -58,19 +61,21 @@ The registry includes a bootstrap endpoint to create your first admin token with
 # Create the first admin token (run once on first startup)
 curl -X POST http://localhost:8080/bootstrap \
   -H 'Content-Type: application/json' \
-  -d '{"body": {"name": "admin"}}'
-# => {"body": {"id": "...", "name": "admin", "token": "mcp_xxxxxxxxxxxx", "created_at": "..."}}
+  -d '{"name": "admin"}'
+# => {"$schema":"...","id":"...","name":"admin","token":"mcp_...","created_at":"..."}
 ```
 
-**Important:** Save the token immediately! The bootstrap endpoint returns the full token, but for security reasons you should store it safely.
+The request body and the response are plain JSON objects. A second call returns `403` once any token exists.
 
-Then use this token with the mcpfleet CLI:
+**Important:** Save the token immediately. The registry stores only its hash, so this response is the only time you see the full token.
+
+Then log in with the mcpfleet CLI. It saves the token and the registry URL for later commands:
 
 ```bash
-export MCPFLEET_REGISTRY_URL=http://localhost:8080
-mcpfleet auth login
-# enter your token when prompted
+mcpfleet auth login --url http://localhost:8080 --token mcp_...
 ```
+
+Run `mcpfleet auth login` without flags to enter both in an interactive form instead.
 
 ## Authentication
 
@@ -116,18 +121,19 @@ When running, interactive API docs are available at:
 
 | Environment variable | Default | Description |
 |----------------------|---------|-------------|
+| `DATABASE_URL` | `./registry.db` | Path to the SQLite database file (the Docker image and `docker-compose.yml` set `/data/registry.db`) |
 | `PORT` | `8080` | HTTP listen port |
-| `DB_PATH` | `./registry.db` | Path to SQLite database file |
-| `LOG_LEVEL` | `info` | Log level (debug/info/warn/error) |
+
+These are the only settings; the registry reads no other environment variables or config files.
 
 ## Development
 
 ```bash
 git clone https://github.com/mcpfleet/mcpfleet-registry
 cd mcpfleet-registry
-go mod tidy
-go test ./...
-go run ./cmd/registry
+CGO_ENABLED=1 go vet ./...
+CGO_ENABLED=1 go test ./... -count=1
+CGO_ENABLED=1 go run ./cmd/registry
 ```
 
 ## Docker
@@ -136,11 +142,11 @@ go run ./cmd/registry
 # Build image
 docker build -t mcpfleet-registry .
 
-# Run with persistent database
+# Run with a persistent database in a named volume
 docker run -d \
   -p 8080:8080 \
-  -v $(pwd)/data:/data \
-  -e DB_PATH=/data/registry.db \
+  -v mcpfleet-registry-data:/data \
+  -e DATABASE_URL=/data/registry.db \
   mcpfleet-registry
 ```
 
