@@ -291,6 +291,9 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 		existing.Transport = "stdio"
 	}
 	if err := h.store.UpdateServer(ctx, existing); err != nil {
+		if errors.Is(err, db.ErrNameTaken) {
+			return nil, nameTakenError(existing.Name)
+		}
 		return nil, huma.Error500InternalServerError("update server", err)
 	}
 	return &SingleServerOutput{Body: toServerOutput(*existing)}, nil

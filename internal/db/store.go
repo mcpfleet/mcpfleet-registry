@@ -124,6 +124,8 @@ func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	return err
 }
 
+// UpdateServer overwrites the server with srv.ID. It returns ErrNameTaken
+// when srv.Name is already used by another server.
 func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	srv.UpdatedAt = time.Now().UTC()
 	installJSON, _ := json.Marshal(srv.Install)
@@ -133,6 +135,9 @@ func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	platformsJSON, _ := json.Marshal(srv.Platforms)
 	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, args=?, env=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
 		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
+	if isUniqueViolation(err) {
+		return ErrNameTaken
+	}
 	return err
 }
 

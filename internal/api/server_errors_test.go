@@ -43,3 +43,30 @@ func TestCreateServer_DuplicateNameIs409(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
 	assert.Equal(t, `server name "dup" is already taken`, problemDetail(t, body))
 }
+
+func TestUpdateServer_RenameToTakenIs409(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	for _, name := range []string{"first", "second"} {
+		resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"`+name+`"}`)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	}
+
+	resp, body := doJSON(t, http.MethodPut, server.URL+"/v1/servers/second", `{"name":"first"}`)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+	assert.Equal(t, `server name "first" is already taken`, problemDetail(t, body))
+}
+
+func TestUpdateServer_SameNameIs200(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"keep"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = doJSON(t, http.MethodPut, server.URL+"/v1/servers/keep", `{"name":"keep","description":"updated"}`)
+	assert.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+}
