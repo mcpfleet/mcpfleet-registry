@@ -94,36 +94,40 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 // --- DTOs ---
 
 type ServerOutput struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Transport   string            `json:"transport"`
-	Install     map[string]string `json:"install"`
-	Command     string            `json:"command"`
-	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
-	Tags        []string          `json:"tags"`
-	Platforms   []string          `json:"platforms"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Transport   string               `json:"transport"`
+	Install     map[string]string    `json:"install"`
+	Command     string               `json:"command"`
+	Args        []string             `json:"args"`
+	Env         map[string]db.EnvVar `json:"env"`
+	Tags        []string             `json:"tags"`
+	Platforms   []string             `json:"platforms"`
+	CreatedAt   string               `json:"created_at"`
+	UpdatedAt   string               `json:"updated_at"`
 }
 
 type ServersOutput struct {
 	Body []ServerOutput
 }
 
+// ServerBody is the request body of create and update. Huma treats every
+// field without omitempty as required, so only name is mandatory.
+type ServerBody struct {
+	Name        string               `json:"name" required:"true" minLength:"1"`
+	Description string               `json:"description,omitempty"`
+	Transport   string               `json:"transport,omitempty"`
+	Install     map[string]string    `json:"install,omitempty"`
+	Command     string               `json:"command,omitempty"`
+	Args        []string             `json:"args,omitempty"`
+	Env         map[string]db.EnvVar `json:"env,omitempty"`
+	Tags        []string             `json:"tags,omitempty"`
+	Platforms   []string             `json:"platforms,omitempty"`
+}
+
 type ServerInput struct {
-	Body struct {
-		Name        string            `json:"name" required:"true"`
-		Description string            `json:"description"`
-		Transport   string            `json:"transport"`
-		Install     map[string]string `json:"install"`
-		Command     string            `json:"command"`
-		Args        []string          `json:"args"`
-		Env         map[string]string `json:"env"`
-		Tags        []string          `json:"tags"`
-		Platforms   []string          `json:"platforms"`
-	}
+	Body ServerBody
 }
 
 type IDInput struct {
@@ -174,7 +178,7 @@ func toServerOutput(s db.Server) ServerOutput {
 	}
 	env := s.Env
 	if env == nil {
-		env = map[string]string{}
+		env = map[string]db.EnvVar{}
 	}
 	tags := s.Tags
 	if tags == nil {
@@ -255,17 +259,7 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 
 func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Name        string            `json:"name"`
-		Description string            `json:"description"`
-		Transport   string            `json:"transport"`
-		Install     map[string]string `json:"install"`
-		Command     string            `json:"command"`
-		Args        []string          `json:"args"`
-		Env         map[string]string `json:"env"`
-		Tags        []string          `json:"tags"`
-		Platforms   []string          `json:"platforms"`
-	}
+	Body ServerBody
 }) (*SingleServerOutput, error) {
 	existing, err := h.store.GetServer(ctx, input.ID)
 	if err != nil {
@@ -283,6 +277,9 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 	existing.Env = input.Body.Env
 	existing.Tags = input.Body.Tags
 	existing.Platforms = input.Body.Platforms
+	if existing.Transport == "" {
+		existing.Transport = "stdio"
+	}
 	if err := h.store.UpdateServer(ctx, existing); err != nil {
 		return nil, huma.Error500InternalServerError("update server", err)
 	}
