@@ -56,3 +56,10 @@ func TestRun_UnknownCommandIsUsageError(t *testing.T) {
 	assert.Equal(t, 2, code)
 	assert.Contains(t, stderr.String(), "usage")
 }
+
+func TestRun_TokenCreateHelpIsSuccess(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"token", "create", "-h"}, &stdout, &stderr)
+	assert.Equal(t, 0, code)
+	assert.Contains(t, stderr.String(), "-name")
+}
