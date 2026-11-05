@@ -32,6 +32,12 @@ func Migrate(db *sql.DB) error {
 		{4, `ALTER TABLE servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'stdio'`},
 		{5, `ALTER TABLE servers ADD COLUMN install TEXT NOT NULL DEFAULT '{}'`},
 		{6, `ALTER TABLE servers ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'`},
+		// registry_state holds one-off facts about the database. The
+		// bootstrapped_at row closes POST /bootstrap for good.
+		{7, `CREATE TABLE IF NOT EXISTS registry_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)

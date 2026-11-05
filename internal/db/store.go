@@ -182,7 +182,68 @@ type CreateTokenResult struct {
 	RawToken string `json:"token"`
 }
 
+// bootstrappedKey is the registry_state row that closes POST /bootstrap.
+const bootstrappedKey = "bootstrapped_at"
+
+// execer is the subset of *sql.DB and *sql.Tx the token helpers need.
+type execer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// CreateToken creates a token and marks the registry as bootstrapped, so a
+// token made any other way than POST /bootstrap also closes bootstrap.
 func (s *Store) CreateToken(ctx context.Context, name string) (*CreateTokenResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO registry_state (key, value) VALUES (?, ?)`,
+		bootstrappedKey, nowString()); err != nil {
+		return nil, fmt.Errorf("mark bootstrapped: %w", err)
+	}
+	t, err := insertToken(ctx, tx, name)
+	if err != nil {
+		return nil, err
+	}
+	return t, tx.Commit()
+}
+
+// Bootstrap creates the first token of the registry. It succeeds once in the
+// life of the database: the bootstrapped_at flag and the token are written in
+// one transaction, and the flag's primary key makes a second call (including
+// a concurrent one) fail with ErrAlreadyBootstrapped, even after every token
+// has been deleted.
+func (s *Store) Bootstrap(ctx context.Context, name string) (*CreateTokenResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, `INSERT INTO registry_state (key, value) VALUES (?, ?)`,
+		bootstrappedKey, nowString()); err != nil {
+		if isPrimaryKeyViolation(err) {
+			return nil, ErrAlreadyBootstrapped
+		}
+		return nil, fmt.Errorf("mark bootstrapped: %w", err)
+	}
+	t, err := insertToken(ctx, tx, name)
+	if err != nil {
+		return nil, err
+	}
+	return t, tx.Commit()
+}
+
+// IsBootstrapped reports whether POST /bootstrap is closed for this database.
+func (s *Store) IsBootstrapped(ctx context.Context) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM registry_state WHERE key = ?`, bootstrappedKey).Scan(&n)
+	return n > 0, err
+}
+
+func insertToken(ctx context.Context, e execer, name string) (*CreateTokenResult, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return nil, fmt.Errorf("generate token: %w", err)
@@ -195,12 +256,16 @@ func (s *Store) CreateToken(ctx context.Context, name string) (*CreateTokenResul
 	t.Name = name
 	t.CreatedAt = time.Now().UTC()
 	t.RawToken = rawHex
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens (id, name, hash, created_at) VALUES (?,?,?,?)`,
+	_, err := e.ExecContext(ctx, `INSERT INTO tokens (id, name, hash, created_at) VALUES (?,?,?,?)`,
 		t.ID, t.Name, hashHex, t.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+func nowString() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }
 
 func (s *Store) DeleteToken(ctx context.Context, id string) error {

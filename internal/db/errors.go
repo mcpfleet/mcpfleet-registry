@@ -13,6 +13,9 @@ var (
 	ErrNotFound = errors.New("not found")
 	// ErrNameTaken means another row already uses the unique name.
 	ErrNameTaken = errors.New("name already taken")
+	// ErrAlreadyBootstrapped means the database has been bootstrapped
+	// before; bootstrap works once in the life of a database.
+	ErrAlreadyBootstrapped = errors.New("registry already bootstrapped")
 )
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint
@@ -20,4 +23,11 @@ var (
 func isUniqueViolation(err error) bool {
 	var se sqlite3.Error
 	return errors.As(err, &se) && se.ExtendedCode == sqlite3.ErrConstraintUnique
+}
+
+// isPrimaryKeyViolation reports whether err is a SQLite PRIMARY KEY
+// constraint violation.
+func isPrimaryKeyViolation(err error) bool {
+	var se sqlite3.Error
+	return errors.As(err, &se) && se.ExtendedCode == sqlite3.ErrConstraintPrimaryKey
 }

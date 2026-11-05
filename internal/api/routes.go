@@ -89,6 +89,7 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Method:      http.MethodPost,
 		Path:        "/bootstrap",
 		Summary:     "Create first admin token (no auth required)",
+		Description: "Works once in the life of the registry database. Once any token has been created, it returns 403, even if every token is later deleted.",
 		Tags:        []string{"bootstrap"},
 	}, h.Bootstrap)
 }
@@ -354,19 +355,12 @@ func (h *Handler) DeleteToken(ctx context.Context, input *IDInput) (*struct{}, e
 }
 
 func (h *Handler) Bootstrap(ctx context.Context, input *BootstrapInput) (*BootstrapOutput, error) {
-	// Check if any tokens already exist
-	tokens, err := h.store.ListTokens(ctx)
+	result, err := h.store.Bootstrap(ctx, input.Body.Name)
 	if err != nil {
-		return nil, huma.Error500InternalServerError("check tokens", err)
-	}
-	if len(tokens) > 0 {
-		return nil, huma.Error403Forbidden("bootstrap only available when no tokens exist")
-	}
-
-	// Create first admin token
-	result, err := h.store.CreateToken(ctx, input.Body.Name)
-	if err != nil {
-		return nil, huma.Error500InternalServerError("create token", err)
+		if errors.Is(err, db.ErrAlreadyBootstrapped) {
+			return nil, huma.Error403Forbidden("registry already bootstrapped; create tokens with an existing token or the registry token create command")
+		}
+		return nil, huma.Error500InternalServerError("bootstrap", err)
 	}
 
 	out := &BootstrapOutput{}
