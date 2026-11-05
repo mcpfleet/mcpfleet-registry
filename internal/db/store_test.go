@@ -33,7 +33,7 @@ func TestStoreServers(t *testing.T) {
 			Install:     map[string]string{"type": "npx", "package": "@test/server"},
 			Command:     "npx",
 			Args:        []string{"-y", "@test/server"},
-			Env:         map[string]string{"TEST_VAR": "test_value"},
+			Env:         map[string]EnvVar{"TEST_VAR": {Value: "test_value"}},
 			Tags:        []string{"dev", "test"},
 			Platforms:   []string{"linux", "darwin"},
 		}
@@ -211,4 +211,47 @@ func TestValidateToken(t *testing.T) {
 		require.NotNil(t, token)
 		assert.NotNil(t, token.LastUsedAt)
 	})
+}
+
+func TestStore_LegacyStringEnv(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	// Rows written before env became {value, secret} objects hold plain strings.
+	_, err := db.Exec(`INSERT INTO servers (id, name, command, env) VALUES ('legacy-id', 'legacy', 'npx', '{"K":"v"}')`)
+	require.NoError(t, err)
+
+	srv, err := store.GetServer(ctx, "legacy-id")
+	require.NoError(t, err)
+	require.NotNil(t, srv)
+	assert.Equal(t, map[string]EnvVar{"K": {Value: "v"}}, srv.Env)
+
+	list, err := store.ListServers(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, map[string]EnvVar{"K": {Value: "v"}}, list[0].Env)
+}
+
+func TestStore_GetDeleteByName(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	srv := &Server{Name: "by-name", Transport: "stdio", Command: "npx",
+		Env: map[string]EnvVar{"TOKEN": {Secret: "vault_key"}}}
+	require.NoError(t, store.CreateServer(ctx, srv))
+
+	fetched, err := store.GetServer(ctx, "by-name")
+	require.NoError(t, err)
+	require.NotNil(t, fetched)
+	assert.Equal(t, srv.ID, fetched.ID)
+	assert.Equal(t, map[string]EnvVar{"TOKEN": {Secret: "vault_key"}}, fetched.Env)
+
+	require.NoError(t, store.DeleteServer(ctx, "by-name"))
+	fetched, err = store.GetServer(ctx, srv.ID)
+	require.NoError(t, err)
+	assert.Nil(t, fetched)
 }
