@@ -32,3 +32,8 @@ jobs:
         env:
           CGO_ENABLED: 1
         run: go vet ./...
+
+      - name: Run tests
+        env:
+          CGO_ENABLED: 1
+        run: go test ./... -count=1
