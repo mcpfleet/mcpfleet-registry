@@ -38,6 +38,13 @@ func Migrate(db *sql.DB) error {
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		)`},
+		// A database that was used before registry_state existed (it has
+		// tokens or servers) is marked bootstrapped, so one whose tokens were
+		// all deleted is not reopened. An empty database stays open, like a
+		// fresh install.
+		{8, `INSERT OR IGNORE INTO registry_state (key, value)
+			SELECT 'bootstrapped_at', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+			WHERE EXISTS (SELECT 1 FROM tokens) OR EXISTS (SELECT 1 FROM servers)`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)
