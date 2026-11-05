@@ -268,9 +268,31 @@ func nowString() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+// DeleteToken deletes a token. It returns ErrNotFound for an unknown id and
+// ErrLastToken when the token is the only one left. The count check runs in
+// the DELETE itself, so two concurrent deletes cannot remove the last two
+// tokens.
 func (s *Store) DeleteToken(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM tokens WHERE id = ?`, id)
-	return err
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM tokens WHERE id = ? AND (SELECT COUNT(*) FROM tokens) > 1`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tokens WHERE id = ?`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return ErrLastToken
+	}
+	return ErrNotFound
 }
 
 func (s *Store) ValidateToken(ctx context.Context, raw string) (bool, error) {

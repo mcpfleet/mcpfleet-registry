@@ -88,3 +88,21 @@ func TestMigrate_BackfillsBootstrapped(t *testing.T) {
 		})
 	}
 }
+
+func TestStore_DeleteToken(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	assert.ErrorIs(t, store.DeleteToken(ctx, "nope"), ErrNotFound)
+
+	first, err := store.CreateToken(ctx, "first")
+	require.NoError(t, err)
+	assert.ErrorIs(t, store.DeleteToken(ctx, first.ID), ErrLastToken)
+
+	_, err = store.CreateToken(ctx, "second")
+	require.NoError(t, err)
+	require.NoError(t, store.DeleteToken(ctx, first.ID))
+	assert.ErrorIs(t, store.DeleteToken(ctx, first.ID), ErrNotFound)
+}

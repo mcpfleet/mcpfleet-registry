@@ -16,6 +16,9 @@ var (
 	// ErrAlreadyBootstrapped means the database has been bootstrapped
 	// before; bootstrap works once in the life of a database.
 	ErrAlreadyBootstrapped = errors.New("registry already bootstrapped")
+	// ErrLastToken means the delete would remove the only remaining token
+	// and lock every client out of the registry.
+	ErrLastToken = errors.New("cannot delete the last token")
 )
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint

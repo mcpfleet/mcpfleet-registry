@@ -80,6 +80,7 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Method:      http.MethodDelete,
 		Path:        "/v1/tokens/{id}",
 		Summary:     "Delete auth token",
+		Description: "Returns 404 for an unknown token and 409 when the token is the last one left; create a new token before deleting the old one.",
 		Tags:        []string{"tokens"},
 	}, h.DeleteToken)
 
@@ -349,6 +350,12 @@ func (h *Handler) CreateToken(ctx context.Context, input *CreateTokenInput) (*Cr
 
 func (h *Handler) DeleteToken(ctx context.Context, input *IDInput) (*struct{}, error) {
 	if err := h.store.DeleteToken(ctx, input.ID); err != nil {
+		switch {
+		case errors.Is(err, db.ErrNotFound):
+			return nil, huma.Error404NotFound("token not found")
+		case errors.Is(err, db.ErrLastToken):
+			return nil, huma.Error409Conflict("cannot delete the last token")
+		}
 		return nil, huma.Error500InternalServerError("delete token", err)
 	}
 	return nil, nil

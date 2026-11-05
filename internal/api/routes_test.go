@@ -316,6 +316,9 @@ func TestDeleteToken(t *testing.T) {
 	store := db.NewStore(dbConn)
 	ctx := context.Background()
 
+	// The last token cannot be deleted, so keep a second one.
+	_, err := store.CreateToken(ctx, "keep")
+	require.NoError(t, err)
 	result, err := store.CreateToken(ctx, "delete-test")
 	require.NoError(t, err)
 
@@ -330,7 +333,8 @@ func TestDeleteToken(t *testing.T) {
 	// Verify deleted
 	tokens, err := store.ListTokens(ctx)
 	require.NoError(t, err)
-	assert.Len(t, tokens, 0)
+	require.Len(t, tokens, 1)
+	assert.Equal(t, "keep", tokens[0].Name)
 }
 
 // postJSON sends payload as a flat JSON request body, the shape huma expects.
