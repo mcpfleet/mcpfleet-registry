@@ -152,6 +152,9 @@ func TestStoreTokens(t *testing.T) {
 	})
 
 	t.Run("DeleteToken", func(t *testing.T) {
+		// The last token cannot be deleted, so keep a second one.
+		_, err := store.CreateToken(ctx, "keep-token")
+		require.NoError(t, err)
 		result, err := store.CreateToken(ctx, "delete-token")
 		require.NoError(t, err)
 

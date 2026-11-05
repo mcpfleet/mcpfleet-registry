@@ -32,6 +32,19 @@ func Migrate(db *sql.DB) error {
 		{4, `ALTER TABLE servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'stdio'`},
 		{5, `ALTER TABLE servers ADD COLUMN install TEXT NOT NULL DEFAULT '{}'`},
 		{6, `ALTER TABLE servers ADD COLUMN platforms TEXT NOT NULL DEFAULT '[]'`},
+		// registry_state holds one-off facts about the database. The
+		// bootstrapped_at row closes POST /bootstrap for good.
+		{7, `CREATE TABLE IF NOT EXISTS registry_state (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)`},
+		// A database that was used before registry_state existed (it has
+		// tokens or servers) is marked bootstrapped, so one whose tokens were
+		// all deleted is not reopened. An empty database stays open, like a
+		// fresh install.
+		{8, `INSERT OR IGNORE INTO registry_state (key, value)
+			SELECT 'bootstrapped_at', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+			WHERE EXISTS (SELECT 1 FROM tokens) OR EXISTS (SELECT 1 FROM servers)`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)
