@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -205,6 +206,11 @@ func toServerOutput(s db.Server) ServerOutput {
 	}
 }
 
+// nameTakenError is the 409 returned when a server name is already used.
+func nameTakenError(name string) huma.StatusError {
+	return huma.Error409Conflict(fmt.Sprintf("server name %q is already taken", name))
+}
+
 // --- Handlers ---
 
 func (h *Handler) ListServers(ctx context.Context, _ *struct{}) (*ServersOutput, error) {
@@ -253,6 +259,9 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 		srv.Transport = "stdio"
 	}
 	if err := h.store.CreateServer(ctx, srv); err != nil {
+		if errors.Is(err, db.ErrNameTaken) {
+			return nil, nameTakenError(srv.Name)
+		}
 		return nil, huma.Error500InternalServerError("create server", err)
 	}
 	return &SingleServerOutput{Body: toServerOutput(*srv)}, nil

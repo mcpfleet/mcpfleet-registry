@@ -30,3 +30,16 @@ func TestDeleteServer_UnknownIs404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 	assert.Equal(t, "server not found", problemDetail(t, body))
 }
+
+func TestCreateServer_DuplicateNameIs409(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup"}`)
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+	assert.Equal(t, `server name "dup" is already taken`, problemDetail(t, body))
+}

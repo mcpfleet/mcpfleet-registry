@@ -105,6 +105,8 @@ func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	return &srv, nil
 }
 
+// CreateServer inserts srv with a new id. It returns ErrNameTaken when
+// another server already uses srv.Name.
 func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	srv.ID = newID()
 	srv.CreatedAt = time.Now().UTC()
@@ -116,6 +118,9 @@ func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	platformsJSON, _ := json.Marshal(srv.Platforms)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
 		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
+	if isUniqueViolation(err) {
+		return ErrNameTaken
+	}
 	return err
 }
 
