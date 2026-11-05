@@ -15,15 +15,34 @@ type Server struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	Transport   string            `json:"transport"`   // stdio | sse | http
-	Install     map[string]string `json:"install"`     // e.g. {"type":"npx","package":"..."}
+	Transport   string            `json:"transport"` // stdio | sse | http
+	Install     map[string]string `json:"install"`   // e.g. {"type":"npx","package":"..."}
 	Command     string            `json:"command"`
 	Args        []string          `json:"args"`
-	Env         map[string]string `json:"env"`
+	Env         map[string]EnvVar `json:"env"`
 	Tags        []string          `json:"tags"`
-	Platforms   []string          `json:"platforms"`   // linux, darwin, windows
+	Platforms   []string          `json:"platforms"` // linux, darwin, windows
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
+}
+
+// EnvVar is either a literal value or a reference to a secret stored in the
+// client-side vault. The registry stores the reference, never the secret.
+type EnvVar struct {
+	Value  string `json:"value,omitempty"`
+	Secret string `json:"secret,omitempty"`
+}
+
+// UnmarshalJSON also accepts the legacy string form, so rows written before
+// env became an object read back as {"value": "<string>"}.
+func (e *EnvVar) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*e = EnvVar{Value: s}
+		return nil
+	}
+	type plain EnvVar
+	return json.Unmarshal(b, (*plain)(e))
 }
 
 type Token struct {
@@ -66,10 +85,11 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	return servers, rows.Err()
 }
 
+// GetServer looks a server up by its id or by its unique name.
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var srv Server
 	var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ?`, id).Scan(
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ? OR name = ?`, id, id).Scan(
 		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -111,8 +131,9 @@ func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	return err
 }
 
+// DeleteServer removes the server whose id or unique name matches.
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ? OR name = ?`, id, id)
 	return err
 }
 
