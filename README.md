@@ -55,7 +55,7 @@ The database is created as `./registry.db` in the current directory; see [Config
 
 ## First-time setup
 
-The registry includes a bootstrap endpoint to create your first admin token without requiring authentication. This endpoint only works when no tokens exist in the database.
+The registry includes a bootstrap endpoint to create your first admin token without requiring authentication. It works once in the life of the database: as soon as any token has been created, it is closed for good, even if every token is deleted later.
 
 ```bash
 # Create the first admin token (run once on first startup)
@@ -65,7 +65,7 @@ curl -X POST http://localhost:8080/bootstrap \
 # => {"$schema":"...","id":"...","name":"admin","token":"mcp_...","created_at":"..."}
 ```
 
-The request body and the response are plain JSON objects. A second call returns `403` once any token exists.
+The request body and the response are plain JSON objects. Any later call returns `403`.
 
 **Important:** Save the token immediately. The registry stores only its hash, so this response is the only time you see the full token.
 
@@ -89,7 +89,7 @@ Authorization: Bearer mcp_<token>
 - `GET /healthz` — health check
 - `GET /docs` — Swagger UI
 - `GET /openapi.json` — OpenAPI schema
-- `POST /bootstrap` — Create first admin token (only works when database is empty)
+- `POST /bootstrap` — Create the first admin token (works once per database)
 
 ## API reference
 
@@ -109,7 +109,28 @@ Authorization: Bearer mcp_<token>
 |--------|------|-------------|
 | `GET` | `/v1/tokens` | List all tokens |
 | `POST` | `/v1/tokens` | Create a new token |
-| `DELETE` | `/v1/tokens/{id}` | Revoke a token |
+| `DELETE` | `/v1/tokens/{id}` | Revoke a token (`404` if unknown, `409` if it is the last one) |
+
+## Token rotation and recovery
+
+The registry refuses to delete its last token (`409`), so it cannot lock everyone out. To rotate a token, create the new one first, then delete the old one.
+
+If you lose every token value, create a new token on the host that holds the database. The `registry token create` command writes straight to the database file, so it needs access to the host, not to the API:
+
+```bash
+# Docker Compose, server running
+docker compose exec registry registry token create --name rescue
+
+# Docker Compose, server stopped
+docker compose run --rm registry token create --name rescue
+
+# From source, with the same database file the server uses
+DATABASE_URL=./registry.db CGO_ENABLED=1 go run ./cmd/registry token create --name rescue
+```
+
+The command prints the new token on standard output. Log in with it, then delete the tokens you no longer have.
+
+**Upgrading:** a database that already has tokens or servers is marked as bootstrapped on the first start of this version. A database with neither is treated as a fresh install, so run the bootstrap (or `registry token create`) right after the upgrade.
 
 ## API docs
 
