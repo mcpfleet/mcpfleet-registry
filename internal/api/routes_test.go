@@ -339,3 +339,47 @@ func TestDeleteToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, tokens, 0)
 }
+
+// postJSON sends payload as a flat JSON request body, the shape huma expects.
+func postJSON(t *testing.T, url string, payload interface{}) *http.Response {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	resp, err := http.Post(url, "application/json", strings.NewReader(string(body)))
+	require.NoError(t, err)
+	return resp
+}
+
+// A valid bootstrap request must be rejected with 403 once any token exists.
+func TestBootstrap_RejectsWhenTokenExists(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	_, err := db.NewStore(dbConn).CreateToken(context.Background(), "admin")
+	require.NoError(t, err)
+
+	resp := postJSON(t, server.URL+"/bootstrap", map[string]interface{}{"name": "admin2"})
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// huma validates the request body before the handler runs: a body wrapped in
+// a "body" key does not match the schema and is rejected with 422.
+func TestBootstrap_WrappedBodyIs422(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp := postJSON(t, server.URL+"/bootstrap", map[string]interface{}{
+		"body": map[string]interface{}{"name": "x"},
+	})
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+
+	tokens, err := db.NewStore(dbConn).ListTokens(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, tokens)
+}
