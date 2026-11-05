@@ -131,10 +131,21 @@ func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	return err
 }
 
-// DeleteServer removes the server whose id or unique name matches.
+// DeleteServer removes the server whose id or unique name matches. It
+// returns ErrNotFound when no server matched.
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ? OR name = ?`, id, id)
-	return err
+	res, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ? OR name = ?`, id, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Tokens

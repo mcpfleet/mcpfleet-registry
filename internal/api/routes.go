@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -288,6 +289,9 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 
 func (h *Handler) DeleteServer(ctx context.Context, input *IDInput) (*struct{}, error) {
 	if err := h.store.DeleteServer(ctx, input.ID); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, huma.Error404NotFound("server not found")
+		}
 		return nil, huma.Error500InternalServerError("delete server", err)
 	}
 	return nil, nil
