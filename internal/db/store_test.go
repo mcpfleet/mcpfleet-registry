@@ -258,3 +258,47 @@ func TestStore_GetDeleteByName(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, fetched)
 }
+
+func TestStore_RemoteServerURL(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	srv := &Server{Name: "remote", Transport: "http", URL: "https://example.com/mcp"}
+	require.NoError(t, store.CreateServer(ctx, srv))
+
+	fetched, err := store.GetServer(ctx, "remote")
+	require.NoError(t, err)
+	require.NotNil(t, fetched)
+	assert.Equal(t, "https://example.com/mcp", fetched.URL)
+
+	srv.URL = "https://example.com/v2/mcp"
+	require.NoError(t, store.UpdateServer(ctx, srv))
+
+	list, err := store.ListServers(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, "https://example.com/v2/mcp", list[0].URL)
+}
+
+// Migration 9 adds the url column; rows written before it read back with an
+// empty url.
+func TestMigrate_AddsURLColumn(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Roll the database back to how version 8 left it.
+	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 9`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO servers (id, name, command) VALUES ('s1', 'fs', 'npx')`)
+	require.NoError(t, err)
+
+	require.NoError(t, Migrate(db))
+
+	fetched, err := NewStore(db).GetServer(context.Background(), "fs")
+	require.NoError(t, err)
+	require.NotNil(t, fetched)
+	assert.Equal(t, "", fetched.URL)
+	assert.Equal(t, "npx", fetched.Command)
+}
