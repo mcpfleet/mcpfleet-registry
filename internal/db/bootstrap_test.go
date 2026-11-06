@@ -73,7 +73,7 @@ func TestMigrate_BackfillsBootstrapped(t *testing.T) {
 			defer db.Close()
 
 			// Roll the database back to how version 7 left it.
-			_, err := db.Exec(`DELETE FROM registry_state; DELETE FROM schema_version WHERE version >= 8`)
+			_, err := db.Exec(`DELETE FROM registry_state; ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 8`)
 			require.NoError(t, err)
 			if tc.seed != "" {
 				_, err = db.Exec(tc.seed)

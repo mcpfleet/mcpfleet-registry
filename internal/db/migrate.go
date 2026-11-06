@@ -45,6 +45,9 @@ func Migrate(db *sql.DB) error {
 		{8, `INSERT OR IGNORE INTO registry_state (key, value)
 			SELECT 'bootstrapped_at', strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 			WHERE EXISTS (SELECT 1 FROM tokens) OR EXISTS (SELECT 1 FROM servers)`},
+		// url is the endpoint of a remote (sse or http) server; stdio
+		// servers keep it empty.
+		{9, `ALTER TABLE servers ADD COLUMN url TEXT NOT NULL DEFAULT ''`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)

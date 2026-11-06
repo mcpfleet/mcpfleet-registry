@@ -36,10 +36,10 @@ func TestCreateServer_DuplicateNameIs409(t *testing.T) {
 	defer server.Close()
 	defer dbConn.Close()
 
-	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup"}`)
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup","command":"npx"}`)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	resp, body = doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup"}`)
+	resp, body = doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"dup","command":"npx"}`)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
 	assert.Equal(t, `server name "dup" is already taken`, problemDetail(t, body))
 }
@@ -50,11 +50,11 @@ func TestUpdateServer_RenameToTakenIs409(t *testing.T) {
 	defer dbConn.Close()
 
 	for _, name := range []string{"first", "second"} {
-		resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"`+name+`"}`)
+		resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"`+name+`","command":"npx"}`)
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	}
 
-	resp, body := doJSON(t, http.MethodPut, server.URL+"/v1/servers/second", `{"name":"first"}`)
+	resp, body := doJSON(t, http.MethodPut, server.URL+"/v1/servers/second", `{"name":"first","command":"npx"}`)
 	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
 	assert.Equal(t, `server name "first" is already taken`, problemDetail(t, body))
 }
@@ -64,9 +64,9 @@ func TestUpdateServer_SameNameIs200(t *testing.T) {
 	defer server.Close()
 	defer dbConn.Close()
 
-	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"keep"}`)
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", `{"name":"keep","command":"npx"}`)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	resp, body = doJSON(t, http.MethodPut, server.URL+"/v1/servers/keep", `{"name":"keep","description":"updated"}`)
+	resp, body = doJSON(t, http.MethodPut, server.URL+"/v1/servers/keep", `{"name":"keep","command":"npx","description":"updated"}`)
 	assert.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 }

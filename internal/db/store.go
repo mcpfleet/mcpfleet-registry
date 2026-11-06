@@ -18,6 +18,7 @@ type Server struct {
 	Transport   string            `json:"transport"` // stdio | sse | http
 	Install     map[string]string `json:"install"`   // e.g. {"type":"npx","package":"..."}
 	Command     string            `json:"command"`
+	URL         string            `json:"url"` // endpoint of an sse or http server
 	Args        []string          `json:"args"`
 	Env         map[string]EnvVar `json:"env"`
 	Tags        []string          `json:"tags"`
@@ -63,7 +64,7 @@ func NewStore(db *sql.DB) *Store {
 // Servers
 
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at FROM servers ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	for rows.Next() {
 		var srv Server
 		var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(installJSON), &srv.Install)
@@ -89,8 +90,8 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var srv Server
 	var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ? OR name = ?`, id, id).Scan(
-		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ? OR name = ?`, id, id).Scan(
+		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -116,8 +117,8 @@ func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	envJSON, _ := json.Marshal(srv.Env)
 	tagsJSON, _ := json.Marshal(srv.Tags)
 	platformsJSON, _ := json.Marshal(srv.Platforms)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrNameTaken
 	}
@@ -133,8 +134,8 @@ func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	envJSON, _ := json.Marshal(srv.Env)
 	tagsJSON, _ := json.Marshal(srv.Tags)
 	platformsJSON, _ := json.Marshal(srv.Platforms)
-	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, args=?, env=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
-		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
+	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, url=?, args=?, env=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
+		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
 	if isUniqueViolation(err) {
 		return ErrNameTaken
 	}
