@@ -306,3 +306,136 @@ func TestServerName_ValidEdgeCasesAccepted(t *testing.T) {
 		})
 	}
 }
+
+// A remote server carries HTTP headers whose values are literals or secret
+// references; the registry stores and returns them like env. Every response
+// has a headers object, empty for a server without headers.
+func TestServer_HeadersRoundTrip(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers",
+		`{"name":"remote","transport":"http","url":"https://example.com/mcp","headers":{"Authorization":{"secret":"example_auth"},"X-Client":{"value":"mcpfleet"}}}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	type headersOut struct {
+		Headers map[string]map[string]string `json:"headers"`
+	}
+	want := map[string]map[string]string{
+		"Authorization": {"secret": "example_auth"},
+		"X-Client":      {"value": "mcpfleet"},
+	}
+	resp, body = doJSON(t, http.MethodGet, server.URL+"/v1/servers/remote", "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var got headersOut
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, want, got.Headers)
+
+	resp, body = doJSON(t, http.MethodPut, server.URL+"/v1/servers/remote",
+		`{"name":"remote","transport":"sse","url":"https://example.com/sse","headers":{"X-Api-Key":{"secret":"example_key"}}}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = doJSON(t, http.MethodGet, server.URL+"/v1/servers", "")
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var list []headersOut
+	require.NoError(t, json.Unmarshal(body, &list))
+	require.Len(t, list, 1)
+	assert.Equal(t, map[string]map[string]string{"X-Api-Key": {"secret": "example_key"}}, list[0].Headers)
+
+	resp, body = doJSON(t, http.MethodPost, server.URL+"/v1/servers",
+		`{"name":"local","command":"npx"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(body, &raw))
+	headers, ok := raw["headers"]
+	assert.True(t, ok, "headers missing from %s", body)
+	assert.Equal(t, map[string]any{}, headers)
+}
+
+// Headers are only for remote servers; names must be HTTP tokens without
+// case-insensitive duplicates, each entry holds exactly one of value and
+// secret, values cannot break the header line, and credential headers must
+// reference a secret, since the registry never stores secret values.
+func TestServer_HeadersValidation(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers",
+		`{"name":"existing","transport":"http","url":"https://example.com/mcp"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	const remote = `"name":"a","transport":"http","url":"https://example.com/mcp"`
+	type detail struct{ location, message string }
+	cases := []struct {
+		name string
+		body string
+		want []detail
+	}{
+		{"stdio with headers", `{"name":"a","command":"npx","headers":{"X-Client":{"value":"x"}}}`,
+			[]detail{{"body.headers", "headers is only used for transport http or sse"}}},
+		{"name with space", `{` + remote + `,"headers":{"X Client":{"value":"x"}}}`,
+			[]detail{{"body.headers.X Client", "header name must be an HTTP token"}}},
+		{"name with colon", `{` + remote + `,"headers":{"X-Client:":{"value":"x"}}}`,
+			[]detail{{"body.headers.X-Client:", "header name must be an HTTP token"}}},
+		{"empty name", `{` + remote + `,"headers":{"":{"value":"x"}}}`,
+			[]detail{{"body.headers.", "header name must be an HTTP token"}}},
+		{"duplicate name", `{` + remote + `,"headers":{"X-Client":{"value":"a"},"x-client":{"value":"b"}}}`,
+			[]detail{{"body.headers.x-client", "duplicate header (case-insensitive): x-client"}}},
+		{"value and secret", `{` + remote + `,"headers":{"X-Client":{"value":"a","secret":"b"}}}`,
+			[]detail{{"body.headers.X-Client", "header needs exactly one of value or secret"}}},
+		{"neither value nor secret", `{` + remote + `,"headers":{"X-Client":{}}}`,
+			[]detail{{"body.headers.X-Client", "header needs exactly one of value or secret"}}},
+		{"value with CR LF", `{` + remote + `,"headers":{"X-Client":{"value":"a\r\nX-Evil: 1"}}}`,
+			[]detail{{"body.headers.X-Client", "header value must not contain CR, LF or NUL"}}},
+		{"value with NUL", `{` + remote + `,"headers":{"X-Client":{"value":"a\u0000b"}}}`,
+			[]detail{{"body.headers.X-Client", "header value must not contain CR, LF or NUL"}}},
+		{"literal Authorization", `{` + remote + `,"headers":{"authorization":{"value":"Bearer t0ken"}}}`,
+			[]detail{{"body.headers.authorization", `use {"secret": ...} for credential headers; the registry does not store secret values`}}},
+		{"literal Proxy-Authorization", `{` + remote + `,"headers":{"Proxy-Authorization":{"value":"Basic x"}}}`,
+			[]detail{{"body.headers.Proxy-Authorization", `use {"secret": ...} for credential headers; the registry does not store secret values`}}},
+		{"literal Cookie", `{` + remote + `,"headers":{"Cookie":{"value":"s=1"}}}`,
+			[]detail{{"body.headers.Cookie", `use {"secret": ...} for credential headers; the registry does not store secret values`}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, method := range []string{http.MethodPost, http.MethodPut} {
+				url := server.URL + "/v1/servers"
+				if method == http.MethodPut {
+					url += "/existing"
+				}
+				resp, body := doJSON(t, method, url, tc.body)
+				require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode, "%s: %s", method, body)
+
+				var p struct {
+					Detail string `json:"detail"`
+					Errors []struct {
+						Location string `json:"location"`
+						Message  string `json:"message"`
+					} `json:"errors"`
+				}
+				require.NoError(t, json.Unmarshal(body, &p), string(body))
+				assert.Equal(t, "validation failed", p.Detail)
+				var got []detail
+				for _, e := range p.Errors {
+					got = append(got, detail{e.Location, e.Message})
+				}
+				assert.ElementsMatch(t, tc.want, got, "%s: %s", method, body)
+				assert.NotContains(t, string(body), "t0ken", "a rejected header value is not echoed")
+			}
+		})
+	}
+}
+
+// Header names that are valid tokens, a secret Authorization and literal
+// non-credential headers are accepted.
+func TestServer_HeadersValidAccepted(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers",
+		`{"name":"a","transport":"sse","url":"https://example.com/sse","headers":{"Authorization":{"secret":"a_auth"},"Cookie":{"secret":"a_cookie"},"X-Odd!#$%&'*+.^_`+"`"+`|~1":{"value":"v a l\tue"}}}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+}

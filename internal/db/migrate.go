@@ -48,6 +48,9 @@ func Migrate(db *sql.DB) error {
 		// url is the endpoint of a remote (sse or http) server; stdio
 		// servers keep it empty.
 		{9, `ALTER TABLE servers ADD COLUMN url TEXT NOT NULL DEFAULT ''`},
+		// headers are the HTTP headers of a remote server, a JSON object of
+		// {value?, secret?} entries like env; stdio servers keep it empty.
+		{10, `ALTER TABLE servers ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)

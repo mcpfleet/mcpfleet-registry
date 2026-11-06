@@ -289,7 +289,7 @@ func TestMigrate_AddsURLColumn(t *testing.T) {
 	defer db.Close()
 
 	// Roll the database back to how version 8 left it.
-	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 9`)
+	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN headers; ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 9`)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO servers (id, name, command) VALUES ('s1', 'fs', 'npx')`)
 	require.NoError(t, err)
@@ -301,4 +301,49 @@ func TestMigrate_AddsURLColumn(t *testing.T) {
 	require.NotNil(t, fetched)
 	assert.Equal(t, "", fetched.URL)
 	assert.Equal(t, "npx", fetched.Command)
+}
+
+func TestStore_RemoteServerHeaders(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	srv := &Server{Name: "remote", Transport: "http", URL: "https://example.com/mcp",
+		Headers: map[string]EnvVar{"Authorization": {Secret: "example_auth"}}}
+	require.NoError(t, store.CreateServer(ctx, srv))
+
+	fetched, err := store.GetServer(ctx, "remote")
+	require.NoError(t, err)
+	require.NotNil(t, fetched)
+	assert.Equal(t, map[string]EnvVar{"Authorization": {Secret: "example_auth"}}, fetched.Headers)
+
+	srv.Headers = map[string]EnvVar{"X-Client": {Value: "mcpfleet"}}
+	require.NoError(t, store.UpdateServer(ctx, srv))
+
+	list, err := store.ListServers(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Equal(t, map[string]EnvVar{"X-Client": {Value: "mcpfleet"}}, list[0].Headers)
+}
+
+// Migration 10 adds the headers column; rows written before it read back
+// with no headers.
+func TestMigrate_AddsHeadersColumn(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	// Roll the database back to how version 9 left it.
+	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN headers; DELETE FROM schema_version WHERE version >= 10`)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO servers (id, name, command, transport, url) VALUES ('s1', 'remote', '', 'http', 'https://example.com/mcp')`)
+	require.NoError(t, err)
+
+	require.NoError(t, Migrate(db))
+
+	fetched, err := NewStore(db).GetServer(context.Background(), "remote")
+	require.NoError(t, err)
+	require.NotNil(t, fetched)
+	assert.Empty(t, fetched.Headers)
+	assert.Equal(t, "https://example.com/mcp", fetched.URL)
 }
