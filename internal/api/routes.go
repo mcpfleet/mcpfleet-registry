@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"unicode"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/mcpfleet/registry/internal/db"
@@ -134,16 +136,19 @@ type ServerBody struct {
 	Platforms   []string             `json:"platforms,omitempty"`
 }
 
-// Resolve checks that command and url fit the transport: a stdio server
-// (the default when transport is empty) runs a command, an sse or http
-// server is reached at an absolute http(s) url. Huma calls it after the
-// schema validation and reports every returned error as one errors[] entry
-// of a 422 response.
+// Resolve checks the name rules (see validateName) and that command and url
+// fit the transport: a stdio server (the default when transport is empty)
+// runs a command, an sse or http server is reached at an absolute http(s)
+// url. Huma calls it after the schema validation and reports every returned
+// error as one errors[] entry of a 422 response.
 func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 	problem := func(field, message string, value any) error {
 		return &huma.ErrorDetail{Location: prefix.With(field), Message: message, Value: value}
 	}
 	var errs []error
+	for _, message := range validateName(b.Name) {
+		errs = append(errs, problem("name", message, b.Name))
+	}
 	switch b.Transport {
 	case "", "stdio":
 		if b.Command == "" {
@@ -165,6 +170,31 @@ func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 		errs = append(errs, problem("transport", "transport must be stdio, sse or http", b.Transport))
 	}
 	return errs
+}
+
+// validateName returns why name cannot be a server name, or nil. A name must
+// work as one segment of /v1/servers/{id}: "." and ".." are dot segments that
+// clients and proxies remove when they normalize a path (RFC 3986 §5.2.4),
+// so such a server could not be read, updated or deleted. Control characters
+// (C0, DEL, C1) break terminal output and agent config keys; the message
+// names the first one by code point, since it is invisible in the JSON value.
+// Only create and update check names, so a stored server with an old invalid
+// name can still be deleted.
+func validateName(name string) []string {
+	var problems []string
+	switch {
+	case name == "." || name == "..":
+		problems = append(problems, `name must not be "." or ".."`)
+	case strings.TrimSpace(name) == "":
+		problems = append(problems, "name must not be empty or only whitespace")
+	}
+	for i, r := range name {
+		if unicode.IsControl(r) {
+			problems = append(problems, fmt.Sprintf("name must not contain control characters (found U+%04X at byte %d)", r, i))
+			break
+		}
+	}
+	return problems
 }
 
 func isHTTPURL(raw string) bool {

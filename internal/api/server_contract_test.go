@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -228,6 +230,79 @@ func TestCreateServer_TransportValidation(t *testing.T) {
 				}
 				assert.ElementsMatch(t, tc.want, got, "%s: %s", method, body)
 			}
+		})
+	}
+}
+
+// A server name must work as one segment of /v1/servers/{id}: "." and ".."
+// are removed by clients and proxies that normalize paths, and control
+// characters break terminal output and agent config keys. Create and
+// update reject such names with 422 at body.name.
+func TestServerName_InvalidIs422(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers",
+		`{"name":"existing","transport":"stdio","command":"npx"}`)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	cases := []struct {
+		name    string
+		message string
+	}{
+		{".", `name must not be "." or ".."`},
+		{"..", `name must not be "." or ".."`},
+		{" ", "name must not be empty or only whitespace"},
+		{"a\nb", "name must not contain control characters (found U+000A at byte 1)"},
+		{"a\x00b", "name must not contain control characters (found U+0000 at byte 1)"},
+		{"a\x7fb", "name must not contain control characters (found U+007F at byte 1)"},
+		{"a\u0085b", "name must not contain control characters (found U+0085 at byte 1)"},
+	}
+	for _, tc := range cases {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			t.Run(method+" "+strconv.Quote(tc.name), func(t *testing.T) {
+				url := server.URL + "/v1/servers"
+				if method == http.MethodPut {
+					url += "/existing"
+				}
+				payload, err := json.Marshal(map[string]any{"name": tc.name, "command": "npx"})
+				require.NoError(t, err)
+				resp, body := doJSON(t, method, url, string(payload))
+				require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode, string(body))
+
+				var p struct {
+					Detail string `json:"detail"`
+					Errors []struct {
+						Location string `json:"location"`
+						Message  string `json:"message"`
+					} `json:"errors"`
+				}
+				require.NoError(t, json.Unmarshal(body, &p), string(body))
+				assert.Equal(t, "validation failed", p.Detail)
+				require.Len(t, p.Errors, 1, string(body))
+				assert.Equal(t, "body.name", p.Errors[0].Location)
+				assert.Equal(t, tc.message, p.Errors[0].Message)
+			})
+		}
+	}
+}
+
+// Names that only look close to the rejected ones stay valid.
+func TestServerName_ValidEdgeCasesAccepted(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	for _, name := range []string{".a", "a..b", "...", "a/b", "zażółć", " a "} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"name": name, "command": "npx"})
+			require.NoError(t, err)
+			resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", string(payload))
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+			resp, body = doJSON(t, http.MethodPut, server.URL+"/v1/servers/"+url.PathEscape(name), string(payload))
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 		})
 	}
 }

@@ -419,3 +419,29 @@ func TestServer_EscapedName(t *testing.T) {
 		})
 	}
 }
+
+// TestServer_LegacyDotNameDeletable covers a server stored with a name that
+// create and update now reject: the {id} path is not checked against the
+// name rules, so a client that sends the path as is can still delete it.
+func TestServer_LegacyDotNameDeletable(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	for _, name := range []string{".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, db.NewStore(dbConn).CreateServer(context.Background(),
+				&db.Server{Name: name, Transport: "stdio", Command: "npx"}))
+
+			u := server.URL + "/v1/servers/" + name
+			resp, body := doJSON(t, http.MethodGet, u, "")
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+			resp, body = doJSON(t, http.MethodDelete, u, "")
+			require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+
+			resp, _ = doJSON(t, http.MethodGet, u, "")
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		})
+	}
+}
