@@ -289,7 +289,7 @@ func TestMigrate_AddsURLColumn(t *testing.T) {
 	defer db.Close()
 
 	// Roll the database back to how version 8 left it.
-	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 9`)
+	_, err := db.Exec(`ALTER TABLE servers DROP COLUMN headers; ALTER TABLE servers DROP COLUMN url; DELETE FROM schema_version WHERE version >= 9`)
 	require.NoError(t, err)
 	_, err = db.Exec(`INSERT INTO servers (id, name, command) VALUES ('s1', 'fs', 'npx')`)
 	require.NoError(t, err)

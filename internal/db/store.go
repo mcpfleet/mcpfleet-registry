@@ -21,6 +21,7 @@ type Server struct {
 	URL         string            `json:"url"` // endpoint of an sse or http server
 	Args        []string          `json:"args"`
 	Env         map[string]EnvVar `json:"env"`
+	Headers     map[string]EnvVar `json:"headers"` // HTTP headers of an sse or http server
 	Tags        []string          `json:"tags"`
 	Platforms   []string          `json:"platforms"` // linux, darwin, windows
 	CreatedAt   time.Time         `json:"created_at"`
@@ -64,7 +65,7 @@ func NewStore(db *sql.DB) *Store {
 // Servers
 
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at FROM servers ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, headers, tags, platforms, created_at, updated_at FROM servers ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -72,13 +73,14 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	var servers []Server
 	for rows.Next() {
 		var srv Server
-		var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
+		var installJSON, argsJSON, envJSON, headersJSON, tagsJSON, platformsJSON string
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &headersJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(installJSON), &srv.Install)
 		_ = json.Unmarshal([]byte(argsJSON), &srv.Args)
 		_ = json.Unmarshal([]byte(envJSON), &srv.Env)
+		_ = json.Unmarshal([]byte(headersJSON), &srv.Headers)
 		_ = json.Unmarshal([]byte(tagsJSON), &srv.Tags)
 		_ = json.Unmarshal([]byte(platformsJSON), &srv.Platforms)
 		servers = append(servers, srv)
@@ -89,9 +91,9 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 // GetServer looks a server up by its id or by its unique name.
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var srv Server
-	var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ? OR name = ?`, id, id).Scan(
-		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
+	var installJSON, argsJSON, envJSON, headersJSON, tagsJSON, platformsJSON string
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, url, args, env, headers, tags, platforms, created_at, updated_at FROM servers WHERE id = ? OR name = ?`, id, id).Scan(
+		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &srv.URL, &argsJSON, &envJSON, &headersJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -101,6 +103,7 @@ func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	_ = json.Unmarshal([]byte(installJSON), &srv.Install)
 	_ = json.Unmarshal([]byte(argsJSON), &srv.Args)
 	_ = json.Unmarshal([]byte(envJSON), &srv.Env)
+	_ = json.Unmarshal([]byte(headersJSON), &srv.Headers)
 	_ = json.Unmarshal([]byte(tagsJSON), &srv.Tags)
 	_ = json.Unmarshal([]byte(platformsJSON), &srv.Platforms)
 	return &srv, nil
@@ -115,10 +118,11 @@ func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	installJSON, _ := json.Marshal(srv.Install)
 	argsJSON, _ := json.Marshal(srv.Args)
 	envJSON, _ := json.Marshal(srv.Env)
+	headersJSON := marshalHeaders(srv.Headers)
 	tagsJSON, _ := json.Marshal(srv.Tags)
 	platformsJSON, _ := json.Marshal(srv.Platforms)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, url, args, env, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, url, args, env, headers, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), headersJSON, string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrNameTaken
 	}
@@ -132,14 +136,25 @@ func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	installJSON, _ := json.Marshal(srv.Install)
 	argsJSON, _ := json.Marshal(srv.Args)
 	envJSON, _ := json.Marshal(srv.Env)
+	headersJSON := marshalHeaders(srv.Headers)
 	tagsJSON, _ := json.Marshal(srv.Tags)
 	platformsJSON, _ := json.Marshal(srv.Platforms)
-	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, url=?, args=?, env=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
-		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
+	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, url=?, args=?, env=?, headers=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
+		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, srv.URL, string(argsJSON), string(envJSON), headersJSON, string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
 	if isUniqueViolation(err) {
 		return ErrNameTaken
 	}
 	return err
+}
+
+// marshalHeaders encodes headers for the headers column, which holds a JSON
+// object; a server without headers stores {} rather than null.
+func marshalHeaders(h map[string]EnvVar) string {
+	if len(h) == 0 {
+		return "{}"
+	}
+	b, _ := json.Marshal(h)
+	return string(b)
 }
 
 // DeleteServer removes the server whose id or unique name matches. It
