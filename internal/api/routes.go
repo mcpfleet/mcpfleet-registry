@@ -180,6 +180,22 @@ type IDInput struct {
 	ID string `path:"id"`
 }
 
+// Resolve decodes an {id} that arrived percent-encoded. When the request path
+// holds an encoded "/" (%2F), Go keeps the raw form in URL.RawPath, chi routes
+// on it and humachi hands the parameter over still encoded; without RawPath
+// chi has already decoded it, so decoding again would corrupt a literal "%".
+func (i *IDInput) Resolve(ctx huma.Context) []error {
+	if ctx.URL().RawPath == "" {
+		return nil
+	}
+	v, err := url.PathUnescape(i.ID)
+	if err != nil {
+		return []error{&huma.ErrorDetail{Location: "path.id", Message: err.Error(), Value: i.ID}}
+	}
+	i.ID = v
+	return nil
+}
+
 type TokenOutput struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -314,7 +330,7 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 }
 
 func (h *Handler) UpdateServer(ctx context.Context, input *struct {
-	ID   string `path:"id"`
+	IDInput
 	Body ServerBody
 }) (*SingleServerOutput, error) {
 	existing, err := h.store.GetServer(ctx, input.ID)
