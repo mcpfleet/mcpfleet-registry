@@ -140,10 +140,11 @@ type ServerBody struct {
 }
 
 // Resolve checks the name rules (see validateName), that command and url
-// fit the transport: a stdio server (the default when transport is empty)
-// runs a command, an sse or http server is reached at an absolute http(s)
-// url, and the header rules of a remote server (see validateHeaders). Huma calls it after the schema validation and reports every returned
-// error as one errors[] entry of a 422 response.
+// fit the transport (a stdio server, the default when transport is empty,
+// runs a command; an sse or http server is reached at an absolute http(s)
+// url), and the header rules of a remote server (see validateHeaders). Huma
+// calls it after the schema validation and reports every returned error as
+// one errors[] entry of a 422 response.
 func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 	problem := func(field, message string, value any) error {
 		return &huma.ErrorDetail{Location: prefix.With(field), Message: message, Value: value}
