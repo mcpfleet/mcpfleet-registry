@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -379,4 +380,42 @@ func TestBootstrap_WrappedBodyIs422(t *testing.T) {
 	tokens, err := db.NewStore(dbConn).ListTokens(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, tokens)
+}
+
+// TestServer_EscapedName covers names that only reach {id} percent-encoded:
+// a "/" arrives as %2F, so the router sees a raw path and must decode it.
+func TestServer_EscapedName(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	for _, name := range []string{"a/b c?d", "a#b", "a%b", "a/b%c", "100%2Fsure"} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"name": name, "command": "npx"})
+			require.NoError(t, err)
+			resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", string(payload))
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+			u := server.URL + "/v1/servers/" + url.PathEscape(name)
+
+			resp, body = doJSON(t, http.MethodGet, u, "")
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			var out map[string]any
+			require.NoError(t, json.Unmarshal(body, &out))
+			assert.Equal(t, name, out["name"])
+
+			payload, err = json.Marshal(map[string]any{"name": name, "command": "uvx"})
+			require.NoError(t, err)
+			resp, body = doJSON(t, http.MethodPut, u, string(payload))
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			require.NoError(t, json.Unmarshal(body, &out))
+			assert.Equal(t, "uvx", out["command"])
+
+			resp, body = doJSON(t, http.MethodDelete, u, "")
+			require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+
+			resp, _ = doJSON(t, http.MethodGet, u, "")
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+		})
+	}
 }
