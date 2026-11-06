@@ -119,7 +119,8 @@ type ServersOutput struct {
 }
 
 // ServerBody is the request body of create and update. Huma treats every
-// field without omitempty as required, so only name is mandatory.
+// field without omitempty as required, so only name is mandatory in the
+// schema; Resolve adds the transport rules for command and url.
 type ServerBody struct {
 	Name        string               `json:"name" required:"true" minLength:"1"`
 	Description string               `json:"description,omitempty"`
