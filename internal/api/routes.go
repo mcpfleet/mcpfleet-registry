@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/mcpfleet/registry/internal/db"
@@ -130,6 +131,44 @@ type ServerBody struct {
 	Env         map[string]db.EnvVar `json:"env,omitempty"`
 	Tags        []string             `json:"tags,omitempty"`
 	Platforms   []string             `json:"platforms,omitempty"`
+}
+
+// Resolve checks that command and url fit the transport: a stdio server
+// (the default when transport is empty) runs a command, an sse or http
+// server is reached at an absolute http(s) url. Huma calls it after the
+// schema validation and reports every returned error as one errors[] entry
+// of a 422 response.
+func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
+	problem := func(field, message string, value any) error {
+		return &huma.ErrorDetail{Location: prefix.With(field), Message: message, Value: value}
+	}
+	var errs []error
+	switch b.Transport {
+	case "", "stdio":
+		if b.Command == "" {
+			errs = append(errs, problem("command", "command is required for transport stdio", b.Command))
+		}
+		if b.URL != "" {
+			errs = append(errs, problem("url", "url is only used for transport http or sse", b.URL))
+		}
+	case "sse", "http":
+		if b.URL == "" {
+			errs = append(errs, problem("url", "url is required for transport "+b.Transport, b.URL))
+		} else if !isHTTPURL(b.URL) {
+			errs = append(errs, problem("url", "url must be an absolute http or https URL", b.URL))
+		}
+		if b.Command != "" {
+			errs = append(errs, problem("command", "command is not used for transport "+b.Transport+"; remove it", b.Command))
+		}
+	default:
+		errs = append(errs, problem("transport", "transport must be stdio, sse or http", b.Transport))
+	}
+	return errs
+}
+
+func isHTTPURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 type ServerInput struct {

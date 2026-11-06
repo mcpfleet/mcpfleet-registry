@@ -160,3 +160,74 @@ func TestServer_StdioHasEmptyURL(t *testing.T) {
 	assert.True(t, ok, "url missing from %s", body)
 	assert.Equal(t, "", url)
 }
+
+// The transport decides which of command and url a server needs; an
+// inconsistent body is 422 with one errors[] entry per problem.
+func TestCreateServer_TransportValidation(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	type detail struct{ location, message string }
+	cases := []struct {
+		name string
+		body string
+		want []detail
+	}{
+		{"http without url", `{"name":"a","transport":"http","command":""}`,
+			[]detail{{"body.url", "url is required for transport http"}}},
+		{"sse without url", `{"name":"a","transport":"sse"}`,
+			[]detail{{"body.url", "url is required for transport sse"}}},
+		{"stdio without command", `{"name":"a","transport":"stdio"}`,
+			[]detail{{"body.command", "command is required for transport stdio"}}},
+		{"default transport without command", `{"name":"a","transport":""}`,
+			[]detail{{"body.command", "command is required for transport stdio"}}},
+		{"stdio with url", `{"name":"a","transport":"stdio","command":"npx","url":"https://example.com/mcp"}`,
+			[]detail{{"body.url", "url is only used for transport http or sse"}}},
+		{"http with command", `{"name":"a","transport":"http","command":"npx","url":"https://example.com/mcp"}`,
+			[]detail{{"body.command", "command is not used for transport http; remove it"}}},
+		{"relative url", `{"name":"a","transport":"http","url":"example.com/mcp"}`,
+			[]detail{{"body.url", "url must be an absolute http or https URL"}}},
+		{"other scheme", `{"name":"a","transport":"sse","url":"ftp://example.com/mcp"}`,
+			[]detail{{"body.url", "url must be an absolute http or https URL"}}},
+		{"unknown transport", `{"name":"a","transport":"websocket","command":"npx"}`,
+			[]detail{{"body.transport", "transport must be stdio, sse or http"}}},
+		{"every problem at once", `{"name":"a","transport":"stdio","url":"https://example.com/mcp"}`,
+			[]detail{
+				{"body.command", "command is required for transport stdio"},
+				{"body.url", "url is only used for transport http or sse"},
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, method := range []string{http.MethodPost, http.MethodPut} {
+				url := server.URL + "/v1/servers"
+				if method == http.MethodPut {
+					resp, body := doJSON(t, http.MethodPost, url,
+						`{"name":"existing","transport":"stdio","command":"npx"}`)
+					if resp.StatusCode != http.StatusConflict {
+						require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+					}
+					url += "/existing"
+				}
+				resp, body := doJSON(t, method, url, tc.body)
+				require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode, "%s: %s", method, body)
+
+				var p struct {
+					Detail string `json:"detail"`
+					Errors []struct {
+						Location string `json:"location"`
+						Message  string `json:"message"`
+					} `json:"errors"`
+				}
+				require.NoError(t, json.Unmarshal(body, &p), string(body))
+				assert.Equal(t, "validation failed", p.Detail)
+				var got []detail
+				for _, e := range p.Errors {
+					got = append(got, detail{e.Location, e.Message})
+				}
+				assert.ElementsMatch(t, tc.want, got, "%s: %s", method, body)
+			}
+		})
+	}
+}
