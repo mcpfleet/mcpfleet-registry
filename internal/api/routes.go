@@ -104,6 +104,7 @@ type ServerOutput struct {
 	Transport   string               `json:"transport"`
 	Install     map[string]string    `json:"install"`
 	Command     string               `json:"command"`
+	URL         string               `json:"url"`
 	Args        []string             `json:"args"`
 	Env         map[string]db.EnvVar `json:"env"`
 	Tags        []string             `json:"tags"`
@@ -124,6 +125,7 @@ type ServerBody struct {
 	Transport   string               `json:"transport,omitempty"`
 	Install     map[string]string    `json:"install,omitempty"`
 	Command     string               `json:"command,omitempty"`
+	URL         string               `json:"url,omitempty"`
 	Args        []string             `json:"args,omitempty"`
 	Env         map[string]db.EnvVar `json:"env,omitempty"`
 	Tags        []string             `json:"tags,omitempty"`
@@ -199,6 +201,7 @@ func toServerOutput(s db.Server) ServerOutput {
 		Transport:   s.Transport,
 		Install:     install,
 		Command:     s.Command,
+		URL:         s.URL,
 		Args:        args,
 		Env:         env,
 		Tags:        tags,
@@ -252,6 +255,7 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 		Transport:   input.Body.Transport,
 		Install:     input.Body.Install,
 		Command:     input.Body.Command,
+		URL:         input.Body.URL,
 		Args:        input.Body.Args,
 		Env:         input.Body.Env,
 		Tags:        input.Body.Tags,
@@ -285,6 +289,7 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 	existing.Transport = input.Body.Transport
 	existing.Install = input.Body.Install
 	existing.Command = input.Body.Command
+	existing.URL = input.Body.URL
 	existing.Args = input.Body.Args
 	existing.Env = input.Body.Env
 	existing.Tags = input.Body.Tags
