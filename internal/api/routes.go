@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -110,6 +111,7 @@ type ServerOutput struct {
 	URL         string               `json:"url"`
 	Args        []string             `json:"args"`
 	Env         map[string]db.EnvVar `json:"env"`
+	Headers     map[string]db.EnvVar `json:"headers"`
 	Tags        []string             `json:"tags"`
 	Platforms   []string             `json:"platforms"`
 	CreatedAt   string               `json:"created_at"`
@@ -132,14 +134,15 @@ type ServerBody struct {
 	URL         string               `json:"url,omitempty"`
 	Args        []string             `json:"args,omitempty"`
 	Env         map[string]db.EnvVar `json:"env,omitempty"`
+	Headers     map[string]db.EnvVar `json:"headers,omitempty"`
 	Tags        []string             `json:"tags,omitempty"`
 	Platforms   []string             `json:"platforms,omitempty"`
 }
 
-// Resolve checks the name rules (see validateName) and that command and url
+// Resolve checks the name rules (see validateName), that command and url
 // fit the transport: a stdio server (the default when transport is empty)
 // runs a command, an sse or http server is reached at an absolute http(s)
-// url. Huma calls it after the schema validation and reports every returned
+// url, and the header rules of a remote server (see validateHeaders). Huma calls it after the schema validation and reports every returned
 // error as one errors[] entry of a 422 response.
 func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 	problem := func(field, message string, value any) error {
@@ -157,6 +160,9 @@ func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 		if b.URL != "" {
 			errs = append(errs, problem("url", "url is only used for transport http or sse", b.URL))
 		}
+		if len(b.Headers) > 0 {
+			errs = append(errs, problem("headers", "headers is only used for transport http or sse", nil))
+		}
 	case "sse", "http":
 		if b.URL == "" {
 			errs = append(errs, problem("url", "url is required for transport "+b.Transport, b.URL))
@@ -165,6 +171,11 @@ func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 		}
 		if b.Command != "" {
 			errs = append(errs, problem("command", "command is not used for transport "+b.Transport+"; remove it", b.Command))
+		}
+		// Header problems carry no value: it may be a credential, which
+		// must not be echoed into responses and logs.
+		for _, h := range validateHeaders(b.Headers) {
+			errs = append(errs, problem("headers."+h.name, h.message, nil))
 		}
 	default:
 		errs = append(errs, problem("transport", "transport must be stdio, sse or http", b.Transport))
@@ -195,6 +206,76 @@ func validateName(name string) []string {
 		}
 	}
 	return problems
+}
+
+// headerProblem is one rule a header of a server body breaks.
+type headerProblem struct {
+	name    string
+	message string
+}
+
+// credentialHeaders carry credentials, so their value must be a secret
+// reference: the registry stores references, never secret values. Keys are
+// lower case.
+var credentialHeaders = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"cookie":              true,
+}
+
+// validateHeaders returns the problems of the headers of a remote server, in
+// the order of the sorted header names so responses are stable. A name must
+// be an HTTP token (RFC 9110 §5.6.2) and unique ignoring case, the second of
+// two names that differ only in case being the reported one. An entry holds
+// exactly one of value and secret; a value must not contain CR, LF or NUL,
+// which would split or end the header line in the agent's request; and a
+// credential header must use a secret.
+func validateHeaders(headers map[string]db.EnvVar) []headerProblem {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var problems []headerProblem
+	seen := map[string]bool{}
+	for _, name := range names {
+		h := headers[name]
+		lower := strings.ToLower(name)
+		switch {
+		case !isHTTPToken(name):
+			problems = append(problems, headerProblem{name, "header name must be an HTTP token"})
+		case seen[lower]:
+			problems = append(problems, headerProblem{name, "duplicate header (case-insensitive): " + lower})
+		}
+		seen[lower] = true
+		switch {
+		case (h.Value == "") == (h.Secret == ""):
+			problems = append(problems, headerProblem{name, "header needs exactly one of value or secret"})
+		case strings.ContainsAny(h.Value, "\r\n\x00"):
+			problems = append(problems, headerProblem{name, "header value must not contain CR, LF or NUL"})
+		case h.Value != "" && credentialHeaders[lower]:
+			problems = append(problems, headerProblem{name, `use {"secret": ...} for credential headers; the registry does not store secret values`})
+		}
+	}
+	return problems
+}
+
+// isHTTPToken reports whether s is a non-empty RFC 9110 token: ASCII letters,
+// digits and !#$%&'*+-.^_`|~.
+func isHTTPToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isHTTPURL(raw string) bool {
@@ -272,6 +353,10 @@ func toServerOutput(s db.Server) ServerOutput {
 	if env == nil {
 		env = map[string]db.EnvVar{}
 	}
+	headers := s.Headers
+	if headers == nil {
+		headers = map[string]db.EnvVar{}
+	}
 	tags := s.Tags
 	if tags == nil {
 		tags = []string{}
@@ -290,6 +375,7 @@ func toServerOutput(s db.Server) ServerOutput {
 		URL:         s.URL,
 		Args:        args,
 		Env:         env,
+		Headers:     headers,
 		Tags:        tags,
 		Platforms:   platforms,
 		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
@@ -344,6 +430,7 @@ func (h *Handler) CreateServer(ctx context.Context, input *ServerInput) (*Single
 		URL:         input.Body.URL,
 		Args:        input.Body.Args,
 		Env:         input.Body.Env,
+		Headers:     input.Body.Headers,
 		Tags:        input.Body.Tags,
 		Platforms:   input.Body.Platforms,
 	}
@@ -378,6 +465,7 @@ func (h *Handler) UpdateServer(ctx context.Context, input *struct {
 	existing.URL = input.Body.URL
 	existing.Args = input.Body.Args
 	existing.Env = input.Body.Env
+	existing.Headers = input.Body.Headers
 	existing.Tags = input.Body.Tags
 	existing.Platforms = input.Body.Platforms
 	if existing.Transport == "" {

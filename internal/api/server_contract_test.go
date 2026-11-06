@@ -422,6 +422,7 @@ func TestServer_HeadersValidation(t *testing.T) {
 					got = append(got, detail{e.Location, e.Message})
 				}
 				assert.ElementsMatch(t, tc.want, got, "%s: %s", method, body)
+				assert.NotContains(t, string(body), "t0ken", "a rejected header value is not echoed")
 			}
 		})
 	}
