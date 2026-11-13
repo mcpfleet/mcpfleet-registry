@@ -291,13 +291,44 @@ func TestServerName_InvalidIs422(t *testing.T) {
 	}
 }
 
+// A name with both a control and a format character gets one problem per
+// rule, each naming the first offending character; a second character of the
+// same kind adds nothing.
+func TestServerName_ControlAndFormatBothReported(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	payload, err := json.Marshal(map[string]any{"name": "a\n\u202eb\t\u200b", "command": "npx"})
+	require.NoError(t, err)
+	resp, body := doJSON(t, http.MethodPost, server.URL+"/v1/servers", string(payload))
+	require.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode, string(body))
+
+	var p struct {
+		Errors []struct {
+			Location string `json:"location"`
+			Message  string `json:"message"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(body, &p), string(body))
+	var messages []string
+	for _, e := range p.Errors {
+		assert.Equal(t, "body.name", e.Location)
+		messages = append(messages, e.Message)
+	}
+	assert.Equal(t, []string{
+		"name must not contain control characters (found U+000A at byte 1)",
+		"name must not contain invisible format characters (found U+202E at byte 2)",
+	}, messages)
+}
+
 // Names that only look close to the rejected ones stay valid.
 func TestServerName_ValidEdgeCasesAccepted(t *testing.T) {
 	dbConn, server := setupTestAPI(t)
 	defer server.Close()
 	defer dbConn.Close()
 
-	for _, name := range []string{".a", "a..b", "...", "a/b", "zażółć", " a "} {
+	for _, name := range []string{".a", "a..b", "...", "a/b", "zażółć", " a ", "\u2615\ufe0f"} {
 		t.Run(name, func(t *testing.T) {
 			payload, err := json.Marshal(map[string]any{"name": name, "command": "npx"})
 			require.NoError(t, err)
