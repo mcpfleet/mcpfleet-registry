@@ -445,3 +445,45 @@ func TestServer_LegacyDotNameDeletable(t *testing.T) {
 		})
 	}
 }
+
+// TestServer_LegacyFormatCharNameDeletable covers a server stored before the
+// format character rule: it can still be read and deleted, and an update that
+// gives it a valid name renames it.
+func TestServer_LegacyFormatCharNameDeletable(t *testing.T) {
+	dbConn, server := setupTestAPI(t)
+	defer server.Close()
+	defer dbConn.Close()
+
+	store := db.NewStore(dbConn)
+	name := "a‮b"
+
+	t.Run("delete", func(t *testing.T) {
+		require.NoError(t, store.CreateServer(context.Background(),
+			&db.Server{Name: name, Transport: "stdio", Command: "npx"}))
+
+		u := server.URL + "/v1/servers/" + url.PathEscape(name)
+		resp, body := doJSON(t, http.MethodGet, u, "")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+		resp, body = doJSON(t, http.MethodDelete, u, "")
+		require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+
+		resp, _ = doJSON(t, http.MethodGet, u, "")
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("rename", func(t *testing.T) {
+		require.NoError(t, store.CreateServer(context.Background(),
+			&db.Server{Name: name, Transport: "stdio", Command: "npx"}))
+
+		u := server.URL + "/v1/servers/" + url.PathEscape(name)
+		resp, body := doJSON(t, http.MethodPut, u, `{"name":"ab","transport":"stdio","command":"npx"}`)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+		resp, body = doJSON(t, http.MethodGet, server.URL+"/v1/servers/ab", "")
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+		resp, _ = doJSON(t, http.MethodGet, u, "")
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+}
