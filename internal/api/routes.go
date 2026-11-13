@@ -188,8 +188,12 @@ func (b *ServerBody) Resolve(_ huma.Context, prefix *huma.PathBuffer) []error {
 // work as one segment of /v1/servers/{id}: "." and ".." are dot segments that
 // clients and proxies remove when they normalize a path (RFC 3986 §5.2.4),
 // so such a server could not be read, updated or deleted. Control characters
-// (C0, DEL, C1) break terminal output and agent config keys; the message
-// names the first one by code point, since it is invisible in the JSON value.
+// (C0, DEL, C1) break terminal output and agent config keys. Format
+// characters (Unicode category Cf: bidi overrides and isolates, zero-width
+// spaces and joiners, BOM, tags) are invisible, so a name holding one can
+// pass for another name in a terminal. Each rule reports its first offending
+// character once, by code point and byte offset, since it is invisible in the
+// JSON value.
 // Only create and update check names, so a stored server with an old invalid
 // name can still be deleted.
 func validateName(name string) []string {
@@ -200,9 +204,17 @@ func validateName(name string) []string {
 	case strings.TrimSpace(name) == "":
 		problems = append(problems, "name must not be empty or only whitespace")
 	}
+	foundControl, foundFormat := false, false
 	for i, r := range name {
-		if unicode.IsControl(r) {
+		switch {
+		case !foundControl && unicode.IsControl(r):
+			foundControl = true
 			problems = append(problems, fmt.Sprintf("name must not contain control characters (found U+%04X at byte %d)", r, i))
+		case !foundFormat && unicode.Is(unicode.Cf, r):
+			foundFormat = true
+			problems = append(problems, fmt.Sprintf("name must not contain invisible format characters (found U+%04X at byte %d)", r, i))
+		}
+		if foundControl && foundFormat {
 			break
 		}
 	}
