@@ -258,6 +258,9 @@ func TestServerName_InvalidIs422(t *testing.T) {
 		{"a\x00b", "name must not contain control characters (found U+0000 at byte 1)"},
 		{"a\x7fb", "name must not contain control characters (found U+007F at byte 1)"},
 		{"a\u0085b", "name must not contain control characters (found U+0085 at byte 1)"},
+		{"a\u202eb", "name must not contain invisible format characters (found U+202E at byte 1)"},
+		{"\ufeffgithub", "name must not contain invisible format characters (found U+FEFF at byte 0)"},
+		{"zażółć\u200b", "name must not contain invisible format characters (found U+200B at byte 10)"},
 	}
 	for _, tc := range cases {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
