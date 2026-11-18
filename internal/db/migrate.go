@@ -51,6 +51,25 @@ func Migrate(db *sql.DB) error {
 		// headers are the HTTP headers of a remote server, a JSON object of
 		// {value?, secret?} entries like env; stdio servers keep it empty.
 		{10, `ALTER TABLE servers ADD COLUMN headers TEXT NOT NULL DEFAULT '{}'`},
+		// skills holds Agent Skills: the frontmatter fields, the MCP
+		// servers the skill requires (metadata.mcpfleet-requires, a JSON
+		// array), the tar.gz archive of the skill directory as uploaded, the
+		// skillspec hash of its content and the archive size in bytes.
+		{11, `CREATE TABLE IF NOT EXISTS skills (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			description TEXT NOT NULL,
+			license TEXT NOT NULL DEFAULT '',
+			compatibility TEXT NOT NULL DEFAULT '',
+			allowed_tools TEXT NOT NULL DEFAULT '',
+			metadata TEXT NOT NULL DEFAULT '{}',
+			requires TEXT NOT NULL DEFAULT '[]',
+			archive BLOB NOT NULL,
+			sha256 TEXT NOT NULL,
+			size INTEGER NOT NULL,
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`},
 	}
 
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)`)

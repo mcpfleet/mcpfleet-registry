@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/mattn/go-sqlite3"
 )
@@ -19,7 +20,36 @@ var (
 	// ErrLastToken means the delete would remove the only remaining token
 	// and lock every client out of the registry.
 	ErrLastToken = errors.New("cannot delete the last token")
+	// ErrServerRequired means the server cannot be deleted because one or
+	// more skills require it. The returned error is a *ServerRequiredError.
+	ErrServerRequired = errors.New("server is required by skills")
+	// ErrMissingServers means a skill requires servers the registry does
+	// not have. The returned error is a *MissingServersError.
+	ErrMissingServers = errors.New("required servers are missing")
 )
+
+// ServerRequiredError names the skills that require a server, sorted.
+type ServerRequiredError struct {
+	Skills []string
+}
+
+func (e *ServerRequiredError) Error() string {
+	return ErrServerRequired.Error() + ": " + strings.Join(e.Skills, ", ")
+}
+
+func (e *ServerRequiredError) Unwrap() error { return ErrServerRequired }
+
+// MissingServersError names the required servers the registry does not
+// have, sorted.
+type MissingServersError struct {
+	Servers []string
+}
+
+func (e *MissingServersError) Error() string {
+	return ErrMissingServers.Error() + ": " + strings.Join(e.Servers, ", ")
+}
+
+func (e *MissingServersError) Unwrap() error { return ErrMissingServers }
 
 // isUniqueViolation reports whether err is a SQLite UNIQUE constraint
 // violation.

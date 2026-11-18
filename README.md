@@ -101,7 +101,34 @@ Authorization: Bearer mcp_<token>
 | `GET` | `/v1/servers/{name}` | Get a server by name |
 | `POST` | `/v1/servers` | Create a new server |
 | `PUT` | `/v1/servers/{name}` | Update an existing server |
-| `DELETE` | `/v1/servers/{name}` | Delete a server |
+| `DELETE` | `/v1/servers/{name}` | Delete a server (`409` listing the skills that require it) |
+
+### Skills
+
+Skills follow the [Agent Skills specification](https://agentskills.io/specification). A skill is uploaded as a tar.gz archive that holds one directory named after the skill, with its `SKILL.md` inside:
+
+```bash
+tar -czf notes.tar.gz notes/
+curl -X PUT --data-binary @notes.tar.gz -H "Content-Type: application/gzip" \
+  -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/skills/notes
+```
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/skills` | List all skills (frontmatter, `requires`, `sha256`, archive `size`) |
+| `GET` | `/v1/skills/{name}` | Get a skill's frontmatter and `sha256` |
+| `GET` | `/v1/skills/{name}/archive` | Download the archive (`application/gzip`, hash in `X-Skill-Sha256`) |
+| `PUT` | `/v1/skills/{name}` | Create or replace a skill |
+| `DELETE` | `/v1/skills/{name}` | Delete a skill |
+
+`PUT` validates the skill with the same rules as `mcpfleet skill validate` and answers:
+
+- `422` with the list of violations when the skill breaks the specification (the frontmatter `name` must equal `{name}`); the specification's recommendations come back as `warnings` on success and do not block the upload;
+- `422` when `metadata.mcpfleet-requires` names a server the registry does not have;
+- `422` for an archive that holds anything but `{name}/` with regular files and directories, or that unpacks to more than 10 MiB;
+- `413` when the archive is larger than 1 MiB.
+
+The registry computes the `sha256` itself from the unpacked files, so clients can compare it with their local copy.
 
 ### Auth tokens
 
