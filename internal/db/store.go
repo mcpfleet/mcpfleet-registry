@@ -158,20 +158,48 @@ func marshalHeaders(h map[string]EnvVar) string {
 }
 
 // DeleteServer removes the server whose id or unique name matches. It
-// returns ErrNotFound when no server matched.
+// returns ErrNotFound when no server matched and a *ServerRequiredError
+// (ErrServerRequired) when a skill requires the server.
 func (s *Store) DeleteServer(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM servers WHERE id = ? OR name = ?`, id, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
+	defer func() { _ = tx.Rollback() }()
+
+	// id may match one server by id and another by name; the delete
+	// removes both, so both are checked.
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM servers WHERE id = ? OR name = ?`, id, id)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(names) == 0 {
 		return ErrNotFound
 	}
-	return nil
+	skills, err := skillsRequiring(ctx, tx, names)
+	if err != nil {
+		return err
+	}
+	if len(skills) > 0 {
+		return &ServerRequiredError{Skills: skills}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM servers WHERE id = ? OR name = ?`, id, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Tokens
