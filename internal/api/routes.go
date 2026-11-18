@@ -59,6 +59,7 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Method:      http.MethodDelete,
 		Path:        "/v1/servers/{id}",
 		Summary:     "Delete MCP server",
+		Description: "Returns 404 for an unknown server and 409, listing them in skills, when skills require the server.",
 		Tags:        []string{"servers"},
 	}, h.DeleteServer)
 
@@ -97,6 +98,8 @@ func RegisterRoutes(api huma.API, store *db.Store) {
 		Description: "Works once in the life of the registry database. Once any token has been created, it returns 403, even if every token is later deleted.",
 		Tags:        []string{"bootstrap"},
 	}, h.Bootstrap)
+
+	registerSkillRoutes(api, h)
 }
 
 // --- DTOs ---
@@ -497,6 +500,17 @@ func (h *Handler) DeleteServer(ctx context.Context, input *IDInput) (*struct{}, 
 	if err := h.store.DeleteServer(ctx, input.ID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, huma.Error404NotFound("server not found")
+		}
+		var required *db.ServerRequiredError
+		if errors.As(err, &required) {
+			return nil, &serverRequiredError{
+				ErrorModel: huma.ErrorModel{
+					Status: http.StatusConflict,
+					Title:  http.StatusText(http.StatusConflict),
+					Detail: "server is required by skills: " + strings.Join(required.Skills, ", ") + "; delete or change them first",
+				},
+				Skills: required.Skills,
+			}
 		}
 		return nil, huma.Error500InternalServerError("delete server", err)
 	}
